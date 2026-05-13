@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match any USB device so the app can open when SG-100 is connected. -->
+    <usb-device />
+
+    <!-- HID devices: many vendor tools expose a HID-class interface. -->
+    <usb-device class="3" />
+
+    <!-- Vendor-specific devices: common for industrial controllers/config tools. -->
+    <usb-device class="255" />
+
+    <!-- CDC/communication devices: included in case SG-100 appears as USB serial. -->
+    <usb-device class="2" />
+    <usb-device class="10" />
+</resources>
