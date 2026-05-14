@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_title">SG-100 USB Host</string>
+    <string name="app_subtitle">SG-100 Speed Governor - scan, connect, then send hex or Modbus writes.</string>
+    <string name="default_speed_holding_register">40061</string>
+</resources>
