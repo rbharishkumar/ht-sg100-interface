@@ -12,6 +12,10 @@ import android.content.Context.RECEIVER_NOT_EXPORTED
 import android.content.Context.USB_SERVICE
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
@@ -44,6 +48,9 @@ import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
     private lateinit var usbManager: UsbManager
+    private lateinit var rpmGauge: RpmGaugeView
+    private lateinit var rpmValueText: TextView
+    private lateinit var rpmSourceText: TextView
     private lateinit var deviceText: TextView
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
@@ -207,6 +214,30 @@ class MainActivity : Activity() {
             },
             lpMatchWrap().apply { bottomMargin = dp(16) },
         )
+
+        root.addView(sectionTitle("RPM meter"), lpMatchWrap().apply { bottomMargin = dp(8) })
+
+        rpmGauge = RpmGaugeView(this).apply {
+            background = roundedRect(0xFFFFFFFF.toInt(), 0xFFC9DAD7.toInt(), 14f)
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        root.addView(
+            rpmGauge,
+            LinearLayoutParams(ViewGroupLayoutParams.MATCH_PARENT, dp(210)).apply {
+                bottomMargin = dp(8)
+            },
+        )
+
+        rpmValueText = TextView(this).apply {
+            text = getString(R.string.rpm_initial_value)
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(0xFF052322.toInt())
+        }
+        root.addView(rpmValueText, lpMatchWrap().apply { bottomMargin = dp(2) })
+
+        rpmSourceText = microLabel("Waiting for RPM data")
+        root.addView(rpmSourceText, lpMatchWrap().apply { bottomMargin = dp(18) })
 
         root.addView(sectionTitle("Device"), lpMatchWrap().apply { bottomMargin = dp(6) })
 
@@ -730,6 +761,7 @@ class MainActivity : Activity() {
 
         val payload = bytes
 
+        updateRpmFromModbusFrame(payload, "TX")
         val txAtMillis = System.currentTimeMillis()
         val sent = activeConnection.bulkTransfer(endpoint, payload, payload.size, 1500)
         appendLog("TX requested ${payload.size} bytes, sent $sent: ${toHex(payload)}")
@@ -929,6 +961,7 @@ class MainActivity : Activity() {
         val modbusFrame = extractModbusFrame(received)
         if (modbusFrame != null) {
             appendLog("RX Modbus ${toHex(modbusFrame)}${describeModbusFrame(modbusFrame)}")
+            updateRpmFromModbusFrame(modbusFrame, "RX")
         } else {
             appendLog("RX unparsed ${received.size} bytes: ${toHex(received.trimTrailingZeroBytes())}")
         }
@@ -993,6 +1026,33 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updateRpmFromModbusFrame(frame: ByteArray, source: String) {
+        val rpm = rpmFromModbusFrame(frame) ?: return
+        rpmGauge.setRpm(rpm)
+        rpmValueText.text = getString(R.string.rpm_value_format, rpm)
+        rpmSourceText.text = "$source Modbus RPM value"
+    }
+
+    private fun rpmFromModbusFrame(frame: ByteArray): Int? {
+        if (frame.size < MODBUS_MIN_RESPONSE_LENGTH) return null
+
+        val function = frame[1].toInt() and 0xFF
+        if (function and MODBUS_EXCEPTION_FLAG != 0) return null
+
+        return when (function) {
+            MODBUS_READ_HOLDING_REGISTERS -> {
+                val byteCount = frame.getOrNull(2)?.toInt()?.and(0xFF) ?: return null
+                if (byteCount < 2 || frame.size < 5) return null
+                ((frame[3].toInt() and 0xFF) shl 8) or (frame[4].toInt() and 0xFF)
+            }
+            MODBUS_WRITE_SINGLE_REGISTER -> {
+                if (frame.size < MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH) return null
+                ((frame[4].toInt() and 0xFF) shl 8) or (frame[5].toInt() and 0xFF)
+            }
+            else -> null
+        }
+    }
+
     private fun modbusExceptionName(code: Int): String {
         return when (code) {
             1 -> "Illegal Function"
@@ -1039,6 +1099,94 @@ class MainActivity : Activity() {
         return value?.takeIf { it.isNotBlank() } ?: "Unknown"
     }
 
+    private inner class RpmGaugeView(context: Context) : android.view.View(context) {
+        private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = dp(14).toFloat()
+            color = 0xFFD4E1DE.toInt()
+        }
+        private val activePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = dp(14).toFloat()
+            color = 0xFF169B73.toInt()
+        }
+        private val needlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = dp(4).toFloat()
+            color = 0xFF052322.toInt()
+        }
+        private val hubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = 0xFF052322.toInt()
+        }
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF4B6965.toInt()
+            textAlign = Paint.Align.CENTER
+            textSize = dp(11).toFloat()
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        private val bounds = RectF()
+        private var rpm = 0
+
+        fun setRpm(value: Int) {
+            rpm = value.coerceIn(0, RPM_GAUGE_MAX)
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val width = width.toFloat()
+            val height = height.toFloat()
+            val pad = dp(32).toFloat()
+            val diameter = minOf(width - pad * 2, height * 1.55f)
+            val left = (width - diameter) / 2f
+            val top = pad
+            bounds.set(left, top, left + diameter, top + diameter)
+
+            canvas.drawArc(bounds, 180f, 180f, false, arcPaint)
+            val sweep = 180f * (rpm.toFloat() / RPM_GAUGE_MAX.toFloat())
+            canvas.drawArc(bounds, 180f, sweep, false, activePaint)
+
+            drawTicks(canvas, bounds)
+
+            val centerX = bounds.centerX()
+            val centerY = bounds.centerY()
+            val radius = bounds.width() / 2f - dp(24)
+            val angle = Math.toRadians((180f + sweep).toDouble())
+            val needleX = centerX + kotlin.math.cos(angle).toFloat() * radius
+            val needleY = centerY + kotlin.math.sin(angle).toFloat() * radius
+            canvas.drawLine(centerX, centerY, needleX, needleY, needlePaint)
+            canvas.drawCircle(centerX, centerY, dp(8).toFloat(), hubPaint)
+
+            canvas.drawText("0", bounds.left + dp(14), centerY + dp(24), textPaint)
+            canvas.drawText(RPM_GAUGE_MAX.toString(), bounds.right - dp(20), centerY + dp(24), textPaint)
+            canvas.drawText("RPM", centerX, centerY + dp(48), textPaint)
+        }
+
+        private fun drawTicks(canvas: Canvas, arcBounds: RectF) {
+            val centerX = arcBounds.centerX()
+            val centerY = arcBounds.centerY()
+            val outer = arcBounds.width() / 2f - dp(9)
+            val inner = outer - dp(11)
+            val tickPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF89A29E.toInt()
+                strokeWidth = dp(2).toFloat()
+            }
+
+            for (index in 0..10) {
+                val angle = Math.toRadians((180 + index * 18).toDouble())
+                val startX = centerX + kotlin.math.cos(angle).toFloat() * inner
+                val startY = centerY + kotlin.math.sin(angle).toFloat() * inner
+                val endX = centerX + kotlin.math.cos(angle).toFloat() * outer
+                val endY = centerY + kotlin.math.sin(angle).toFloat() * outer
+                canvas.drawLine(startX, startY, endX, endY, tickPaint)
+            }
+        }
+    }
+
     companion object {
         private const val ACTION_USB_PERMISSION = "com.example.sg100usb.USB_PERMISSION"
         private const val DEFAULT_MODBUS_SLAVE_ID = 1
@@ -1054,6 +1202,7 @@ class MainActivity : Activity() {
         private const val MODBUS_WRITE_SINGLE_REGISTER = 0x06
         private const val MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH = 8
         private const val MODBUS_WRITE_SINGLE_REGISTER_FRAME_LENGTH = 6
+        private const val RPM_GAUGE_MAX = 3000
         private const val DEFAULT_USB_SERIAL_BAUD_RATE = 9600
         private const val USB_SERIAL_STOP_BITS_1: Byte = 0
         private const val USB_SERIAL_PARITY_NONE: Byte = 0

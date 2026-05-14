@@ -2,5 +2,7 @@
 <resources>
     <string name="app_title">SG-100 USB Host</string>
     <string name="app_subtitle">SG-100 Speed Governor - scan, connect, then send hex or Modbus writes.</string>
+    <string name="rpm_initial_value">-- RPM</string>
+    <string name="rpm_value_format">%1$d RPM</string>
     <string name="default_speed_holding_register">40061</string>
 </resources>
