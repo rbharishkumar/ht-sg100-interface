@@ -22,6 +22,7 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.graphics.Typeface
@@ -54,15 +55,24 @@ class MainActivity : Activity() {
     private lateinit var deviceText: TextView
     private lateinit var logText: TextView
     private lateinit var logScroll: ScrollView
+    private lateinit var packetMonitorText: TextView
+    private lateinit var packetMonitorScroll: ScrollView
+    private lateinit var connectionStatusText: TextView
     private lateinit var hexInput: EditText
+    private lateinit var reportIdInput: EditText
+    private lateinit var reportPayloadInput: EditText
     private lateinit var numberInput: EditText
     private lateinit var connectButton: MaterialButton
     private lateinit var interfaceButton: MaterialButton
     private lateinit var sendButton: MaterialButton
+    private lateinit var sendReportButton: MaterialButton
+    private lateinit var saveLogsButton: MaterialButton
     private lateinit var pollTestButton: MaterialButton
     private lateinit var displayButton: MaterialButton
     private lateinit var slaveIdInput: EditText
     private lateinit var registerInput: EditText
+    private lateinit var quantityInput: EditText
+    private lateinit var modbusReadButton: MaterialButton
     private lateinit var baudRateInput: EditText
     private lateinit var parityInput: EditText
 
@@ -72,6 +82,8 @@ class MainActivity : Activity() {
     private var claimedInterface: UsbInterface? = null
     private var inEndpoint: UsbEndpoint? = null
     private var outEndpoint: UsbEndpoint? = null
+    private val logLines = mutableListOf<String>()
+    private val packetMonitorLines = mutableListOf<String>()
     @Volatile private var reading = false
     @Volatile private var lastRxAtMillis = 0L
 
@@ -122,6 +134,18 @@ class MainActivity : Activity() {
         super.onDestroy()
         unregisterReceiver(usbReceiver)
         closeDevice()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == SAVE_HID_LOG_REQUEST_CODE && resultCode == RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) {
+                saveLogsToUri(uri)
+            } else {
+                appendLog("Log save canceled: no destination selected.")
+            }
+        }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -241,6 +265,14 @@ class MainActivity : Activity() {
 
         root.addView(sectionTitle("Device"), lpMatchWrap().apply { bottomMargin = dp(6) })
 
+        connectionStatusText = TextView(this).apply {
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        root.addView(connectionStatusText, lpMatchWrap().apply { bottomMargin = dp(8) })
+        updateConnectionStatus(false)
+
         deviceText = TextView(this).apply {
             textSize = 12f
             typeface = Typeface.MONOSPACE
@@ -265,7 +297,13 @@ class MainActivity : Activity() {
                 marginEnd = dp(10)
             },
         )
-        connectButton = outlinedActionButton("Connect") { requestPermissionAndConnect() }
+        connectButton = outlinedActionButton("Connect") {
+            if (connection != null) {
+                closeDevice()
+            } else {
+                requestPermissionAndConnect()
+            }
+        }
         row.addView(
             connectButton,
             LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 1f),
@@ -295,10 +333,52 @@ class MainActivity : Activity() {
         }
         root.addView(pollTestButton, lpMatchWrap().apply { bottomMargin = dp(22) })
 
-        root.addView(
-            sectionTitle("Modbus write (holding register)"),
-            lpMatchWrap().apply { bottomMargin = dp(6) },
+        root.addView(sectionTitle("Manual HID report"), lpMatchWrap().apply { bottomMargin = dp(6) })
+
+        val reportRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        reportRow.addView(
+            microLabel("Report ID"),
+            LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 0.6f).apply {
+                marginEnd = dp(10)
+            },
         )
+        reportRow.addView(
+            microLabel("Payload bytes"),
+            LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 1.4f),
+        )
+        root.addView(reportRow, lpMatchWrap().apply { bottomMargin = dp(4) })
+
+        val reportFields = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        reportIdInput = EditText(this).apply {
+            setText("00")
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT
+            styleField(this)
+        }
+        reportFields.addView(
+            reportIdInput,
+            LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 0.6f).apply {
+                marginEnd = dp(10)
+            },
+        )
+        reportPayloadInput = EditText(this).apply {
+            hint = "Hex payload bytes"
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT
+            styleField(this)
+        }
+        reportFields.addView(
+            reportPayloadInput,
+            LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 1.4f),
+        )
+        root.addView(reportFields, lpMatchWrap().apply { bottomMargin = dp(10) })
+
+        sendReportButton = filledActionButton("Send HID report") { sendCustomHidReport() }.apply {
+            isEnabled = false
+        }
+        root.addView(sendReportButton, lpMatchWrap().apply { bottomMargin = dp(22) })
+
+        root.addView(sectionTitle("Modbus RTU settings"), lpMatchWrap().apply { bottomMargin = dp(6) })
 
         root.addView(microLabel("Baud rate"), lpMatchWrap().apply { bottomMargin = dp(4) })
         baudRateInput = EditText(this).apply {
@@ -317,6 +397,11 @@ class MainActivity : Activity() {
             styleField(this)
         }
         root.addView(parityInput, lpMatchWrap().apply { bottomMargin = dp(10) })
+
+        root.addView(
+            sectionTitle("Modbus read (decimal register)"),
+            lpMatchWrap().apply { bottomMargin = dp(6) },
+        )
 
         val labelsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         labelsRow.addView(
@@ -344,7 +429,7 @@ class MainActivity : Activity() {
         )
 
         registerInput = EditText(this).apply {
-            setText(getString(R.string.default_speed_holding_register))
+            setText(DEFAULT_MODBUS_READ_REGISTER.toString())
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_NUMBER
             styleField(this)
@@ -354,6 +439,26 @@ class MainActivity : Activity() {
             LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 1f),
         )
         root.addView(modbusFields, lpMatchWrap().apply { bottomMargin = dp(10) })
+
+        root.addView(microLabel("Number of registers to read"), lpMatchWrap().apply { bottomMargin = dp(4) })
+
+        quantityInput = EditText(this).apply {
+            setText("1")
+            isSingleLine = true
+            inputType = InputType.TYPE_CLASS_NUMBER
+            styleField(this)
+        }
+        root.addView(quantityInput, lpMatchWrap().apply { bottomMargin = dp(10) })
+
+        modbusReadButton = filledActionButton("Build and send Modbus read") { sendModbusRead() }.apply {
+            isEnabled = false
+        }
+        root.addView(modbusReadButton, lpMatchWrap().apply { bottomMargin = dp(18) })
+
+        root.addView(
+            sectionTitle("Modbus write (holding register)"),
+            lpMatchWrap().apply { bottomMargin = dp(6) },
+        )
 
         root.addView(microLabel("Value to write"), lpMatchWrap().apply { bottomMargin = dp(4) })
 
@@ -370,7 +475,50 @@ class MainActivity : Activity() {
         }
         root.addView(displayButton, lpMatchWrap().apply { bottomMargin = dp(16) })
 
-        root.addView(sectionTitle("Activity log"), lpMatchWrap().apply { bottomMargin = dp(6) })
+        root.addView(sectionTitle("Live packet monitor"), lpMatchWrap().apply { bottomMargin = dp(6) })
+
+        packetMonitorText = TextView(this).apply {
+            textSize = 12f
+            typeface = Typeface.MONOSPACE
+            setTextColor(0xFF102321.toInt())
+            setTextIsSelectable(true)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = roundedRect(0xFFFFFFFF.toInt(), 0xFFC9DAD7.toInt(), 12f)
+        }
+        packetMonitorScroll = ScrollView(this).apply {
+            setOnTouchListener { view, event ->
+                view.parent?.requestDisallowInterceptTouchEvent(true)
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+                false
+            }
+            addView(
+                packetMonitorText,
+                ViewGroupLayoutParams(
+                    ViewGroupLayoutParams.MATCH_PARENT,
+                    ViewGroupLayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        root.addView(
+            packetMonitorScroll,
+            LinearLayoutParams(ViewGroupLayoutParams.MATCH_PARENT, dp(220)).apply {
+                bottomMargin = dp(16)
+            },
+        )
+
+        val logHeaderRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        logHeaderRow.addView(
+            sectionTitle("Activity log"),
+            LinearLayoutParams(0, ViewGroupLayoutParams.WRAP_CONTENT, 1f),
+        )
+        saveLogsButton = outlinedActionButton("Save logs") { promptSaveLogs() }
+        logHeaderRow.addView(
+            saveLogsButton,
+            LinearLayoutParams(ViewGroupLayoutParams.WRAP_CONTENT, ViewGroupLayoutParams.WRAP_CONTENT),
+        )
+        root.addView(logHeaderRow, lpMatchWrap().apply { bottomMargin = dp(6) })
 
         logText = TextView(this).apply {
             textSize = 12f
@@ -559,7 +707,7 @@ class MainActivity : Activity() {
     }
 
     private fun openDevice(device: UsbDevice) {
-        closeDevice()
+        closeDevice(logDisconnect = false)
 
         val openedConnection = usbManager.openDevice(device)
         if (openedConnection == null) {
@@ -587,9 +735,13 @@ class MainActivity : Activity() {
                 "out=${outEndpoint?.address?.let(::hex8) ?: "none"}"
         )
 
-        sendButton.isEnabled = outEndpoint != null
-        pollTestButton.isEnabled = outEndpoint != null
-        displayButton.isEnabled = outEndpoint != null
+        val canWrite = canWriteHid()
+        sendButton.isEnabled = canWrite
+        pollTestButton.isEnabled = canWrite
+        sendReportButton.isEnabled = canWrite
+        modbusReadButton.isEnabled = canWrite
+        displayButton.isEnabled = canWrite
+        updateConnectionStatus(true)
         startReader()
     }
 
@@ -737,6 +889,7 @@ class MainActivity : Activity() {
                     val received = buffer.copyOf(count)
                     lastRxAtMillis = System.currentTimeMillis()
                     runOnUiThread {
+                        logHidPacket("RX", "ep=${hex8(endpoint.address)}", received, count)
                         appendReceived(received)
                     }
                 }
@@ -746,9 +899,8 @@ class MainActivity : Activity() {
 
     private fun sendHex() {
         val activeConnection = connection
-        val endpoint = outEndpoint
-        if (activeConnection == null || endpoint == null) {
-            appendLog("No writable OUT endpoint.")
+        if (activeConnection == null || !canWriteHid()) {
+            appendLog("No writable HID path. Try another interface, then Connect.")
             return
         }
 
@@ -763,15 +915,99 @@ class MainActivity : Activity() {
 
         updateRpmFromModbusFrame(payload, "TX")
         val txAtMillis = System.currentTimeMillis()
-        val sent = activeConnection.bulkTransfer(endpoint, payload, payload.size, 1500)
-        appendLog("TX requested ${payload.size} bytes, sent $sent: ${toHex(payload)}")
+        writeHidPacket(activeConnection, payload, 1500, "Raw hex")
         checkForReplyAfterTx(txAtMillis)
+    }
+
+    private fun sendCustomHidReport(): Boolean {
+        val activeConnection = connection
+        if (activeConnection == null || !canWriteHid()) {
+            appendLog("No writable HID path. Try another interface, then Connect.")
+            return false
+        }
+
+        val reportId = try {
+            parseReportId(reportIdInput.text.toString())
+        } catch (error: IllegalArgumentException) {
+            appendLog("Invalid report ID: ${error.message}")
+            return false
+        }
+
+        val payload = try {
+            parseOptionalHex(reportPayloadInput.text.toString())
+        } catch (error: IllegalArgumentException) {
+            appendLog("Invalid report payload: ${error.message}")
+            return false
+        }
+
+        val report = ByteArray(payload.size + 1)
+        report[0] = reportId.toByte()
+        payload.copyInto(report, destinationOffset = 1)
+
+        val txAtMillis = System.currentTimeMillis()
+        val sent = writeHidPacket(activeConnection, report, 1500, "Manual HID report")
+        checkForReplyAfterTx(txAtMillis)
+        return sent >= 0
     }
 
     private fun sendModbusPollTest() {
         hexInput.text.replace(0, hexInput.text.length, MODBUS_POLL_TEST_FRAME)
         appendLog("Expected RX: $MODBUS_POLL_TEST_EXPECTED_REPLY")
         sendHex()
+    }
+
+    private fun sendModbusRead(): Boolean {
+        val activeConnection = connection
+        if (activeConnection == null || !canWriteHid()) {
+            appendLog("No writable HID path. Try another interface, then Connect.")
+            return false
+        }
+
+        val slaveId = slaveIdInput.text.toString().trim().toIntOrNull()
+        if (slaveId == null || slaveId !in 1..247) {
+            appendLog("Enter a Modbus slave ID from 1 to 247.")
+            return false
+        }
+
+        val displayRegister = registerInput.text.toString().trim().toIntOrNull()
+        if (displayRegister == null) {
+            appendLog("Enter a decimal register such as 30062 or 40061.")
+            return false
+        }
+
+        val quantity = quantityInput.text.toString().trim().toIntOrNull()
+        if (quantity == null || quantity !in 1..125) {
+            appendLog("Enter a quantity from 1 to 125 registers.")
+            return false
+        }
+
+        val request = try {
+            buildModbusReadRegistersCommand(slaveId, displayRegister, quantity)
+        } catch (error: IllegalArgumentException) {
+            appendLog(error.message ?: "Invalid Modbus read request.")
+            return false
+        }
+
+        val registerType = if (request.functionCode == MODBUS_READ_INPUT_REGISTERS) {
+            "Input Registers"
+        } else {
+            "Holding Registers"
+        }
+        appendLog(
+            "Register conversion: $displayRegister -> $registerType, " +
+                "function=${hex8(request.functionCode)}, " +
+                "zeroBased=${request.zeroBasedAddress} (${hex16(request.zeroBasedAddress)})"
+        )
+
+        val txAtMillis = System.currentTimeMillis()
+        val sent = writeHidPacket(
+            activeConnection,
+            request.frame,
+            1500,
+            "Modbus read slave=$slaveId register=$displayRegister quantity=$quantity",
+        )
+        checkForReplyAfterTx(txAtMillis)
+        return sent >= 0
     }
 
     private fun askModbusValueAndSend() {
@@ -810,9 +1046,8 @@ class MainActivity : Activity() {
 
     private fun sendModbusValue(numberText: String): Boolean {
         val activeConnection = connection
-        val endpoint = outEndpoint
-        if (activeConnection == null || endpoint == null) {
-            appendLog("No writable OUT endpoint.")
+        if (activeConnection == null || !canWriteHid()) {
+            appendLog("No writable HID path. Try another interface, then Connect.")
             return false
         }
 
@@ -842,10 +1077,11 @@ class MainActivity : Activity() {
         }
 
         val txAtMillis = System.currentTimeMillis()
-        val sent = activeConnection.bulkTransfer(endpoint, command, command.size, 1500)
-        appendLog(
-            "Modbus TX slave=$slaveId register=$holdingRegister value=$value " +
-                "requested ${command.size} bytes, sent $sent: ${toHex(command)}"
+        val sent = writeHidPacket(
+            activeConnection,
+            command,
+            1500,
+            "Modbus write slave=$slaveId register=$holdingRegister value=$value",
         )
         checkForReplyAfterTx(txAtMillis)
         return sent >= 0
@@ -890,6 +1126,65 @@ class MainActivity : Activity() {
         return frame
     }
 
+    private fun buildModbusReadRegistersCommand(
+        slaveId: Int,
+        displayRegister: Int,
+        quantity: Int
+    ): ModbusReadRequest {
+        val converted = convertDisplayRegister(displayRegister)
+
+        /*
+         * Modbus RTU read request frame:
+         * [0] Slave ID
+         * [1] Function code: 0x04 for Input Registers, 0x03 for Holding Registers
+         * [2..3] Start address, high byte first
+         * [4..5] Quantity of 16-bit registers, high byte first
+         * [6..7] CRC16, low byte first on the wire
+         */
+        val frame = ByteArray(MODBUS_READ_REQUEST_LENGTH)
+        frame[0] = slaveId.toByte()
+        frame[1] = converted.functionCode.toByte()
+        frame[2] = (converted.zeroBasedAddress shr 8).toByte()
+        frame[3] = (converted.zeroBasedAddress and 0xFF).toByte()
+        frame[4] = (quantity shr 8).toByte()
+        frame[5] = (quantity and 0xFF).toByte()
+
+        /*
+         * Modbus CRC16 starts at 0xFFFF and shifts each bit through the reversed
+         * polynomial 0xA001. The CRC is appended little-endian: low byte, then high byte.
+         */
+        val crc = modbusCrc16(frame.copyOf(MODBUS_READ_REQUEST_WITHOUT_CRC_LENGTH))
+        frame[6] = (crc and 0xFF).toByte()
+        frame[7] = ((crc shr 8) and 0xFF).toByte()
+
+        return ModbusReadRequest(
+            functionCode = converted.functionCode,
+            zeroBasedAddress = converted.zeroBasedAddress,
+            frame = frame,
+        )
+    }
+
+    private fun convertDisplayRegister(displayRegister: Int): ConvertedRegister {
+        /*
+         * Many manuals show human-friendly register numbers like 30062 or 40061.
+         * The leading digit tells you the table:
+         *   3xxxx = Input Register table, read with function 0x04
+         *   4xxxx = Holding Register table, read with function 0x03
+         *
+         * The RTU frame does not send that leading 3 or 4. It sends a zero-based
+         * address inside the selected table. Example: 30062 means the 62nd input
+         * register, so the address sent in the frame is 62 - 1 = 61 = 0x003D.
+         */
+        val functionCode = when (displayRegister) {
+            in 30001..39999 -> MODBUS_READ_INPUT_REGISTERS
+            in 40001..49999 -> MODBUS_READ_HOLDING_REGISTERS
+            else -> throw IllegalArgumentException("Register must be 30001-39999 or 40001-49999.")
+        }
+        val zeroBasedAddress = (displayRegister % 10000) - 1
+        require(zeroBasedAddress in 0..0xFFFF) { "Converted Modbus address must be 0 to 65535." }
+        return ConvertedRegister(functionCode, zeroBasedAddress)
+    }
+
     private fun holdingRegisterToOffset(holdingRegister: Int): Int {
         val offset = when (holdingRegister) {
             in 40001..49999 -> holdingRegister - 40001
@@ -916,13 +1211,20 @@ class MainActivity : Activity() {
         return crc and 0xFFFF
     }
 
-    private fun closeDevice() {
+    private fun closeDevice(logDisconnect: Boolean = true) {
+        val wasConnected = connection != null
         reading = false
         if (::sendButton.isInitialized) {
             sendButton.isEnabled = false
         }
+        if (::sendReportButton.isInitialized) {
+            sendReportButton.isEnabled = false
+        }
         if (::pollTestButton.isInitialized) {
             pollTestButton.isEnabled = false
+        }
+        if (::modbusReadButton.isInitialized) {
+            modbusReadButton.isEnabled = false
         }
         if (::displayButton.isInitialized) {
             displayButton.isEnabled = false
@@ -939,6 +1241,10 @@ class MainActivity : Activity() {
         claimedInterface = null
         inEndpoint = null
         outEndpoint = null
+        updateConnectionStatus(false)
+        if (logDisconnect && wasConnected) {
+            appendLog("Disconnected.")
+        }
     }
 
     private fun parseHex(raw: String): ByteArray {
@@ -957,11 +1263,38 @@ class MainActivity : Activity() {
         }.toByteArray()
     }
 
+    private fun parseOptionalHex(raw: String): ByteArray {
+        val normalized = raw.trim()
+        return if (normalized.isEmpty()) {
+            ByteArray(0)
+        } else {
+            parseHex(normalized)
+        }
+    }
+
+    private fun parseReportId(raw: String): Int {
+        val cleaned = raw
+            .trim()
+            .removePrefix("0x")
+            .removePrefix("0X")
+
+        require(cleaned.isNotEmpty()) { "enter a report ID" }
+        require(cleaned.length <= 2) { "report ID must be one byte" }
+
+        val reportId = cleaned.toIntOrNull(16)
+            ?: cleaned.toIntOrNull()
+            ?: throw IllegalArgumentException("use hex like 00 or decimal 0-255")
+        require(reportId in 0..0xFF) { "report ID must be 0-255" }
+        return reportId
+    }
+
     private fun appendReceived(received: ByteArray) {
-        val modbusFrame = extractModbusFrame(received)
-        if (modbusFrame != null) {
-            appendLog("RX Modbus ${toHex(modbusFrame)}${describeModbusFrame(modbusFrame)}")
-            updateRpmFromModbusFrame(modbusFrame, "RX")
+        val parsed = parseModbusResponse(received)
+        if (parsed != null) {
+            appendLog(parsed.summary)
+            if (parsed.crcPass) {
+                updateRpmFromModbusFrame(parsed.frame, "RX")
+            }
         } else {
             appendLog("RX unparsed ${received.size} bytes: ${toHex(received.trimTrailingZeroBytes())}")
         }
@@ -981,7 +1314,8 @@ class MainActivity : Activity() {
         val function = bytes[1].toInt() and 0xFF
         val expectedLength = when {
             function and MODBUS_EXCEPTION_FLAG != 0 -> MODBUS_EXCEPTION_RESPONSE_LENGTH
-            function == MODBUS_READ_HOLDING_REGISTERS && bytes.size >= 3 -> (bytes[2].toInt() and 0xFF) + MODBUS_RESPONSE_OVERHEAD
+            function in setOf(MODBUS_READ_HOLDING_REGISTERS, MODBUS_READ_INPUT_REGISTERS) && bytes.size >= 3 ->
+                (bytes[2].toInt() and 0xFF) + MODBUS_RESPONSE_OVERHEAD
             function == MODBUS_WRITE_SINGLE_REGISTER -> MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH
             else -> null
         }
@@ -1003,6 +1337,68 @@ class MainActivity : Activity() {
         return null
     }
 
+    private fun parseModbusResponse(received: ByteArray): ParsedModbusResponse? {
+        val trimmed = received.trimTrailingZeroBytes()
+        if (trimmed.size < MODBUS_MIN_RESPONSE_LENGTH) return null
+
+        val frame = extractModbusFrame(trimmed) ?: trimmed
+        if (frame.size < MODBUS_MIN_RESPONSE_LENGTH) return null
+
+        val expectedCrc = modbusCrc16(frame.copyOf(frame.size - MODBUS_CRC_LENGTH))
+        val actualCrc = (frame[frame.size - 2].toInt() and 0xFF) or
+            ((frame[frame.size - 1].toInt() and 0xFF) shl 8)
+        val crcPass = expectedCrc == actualCrc
+        val function = frame[1].toInt() and 0xFF
+
+        val details = StringBuilder()
+        details.append("RX Modbus ${toHex(frame)}")
+        details.append(" | CRC ${if (crcPass) "PASS" else "FAIL"}")
+        details.append(" expected=${hex16(expectedCrc)} actual=${hex16(actualCrc)}")
+
+        when {
+            function and MODBUS_EXCEPTION_FLAG != 0 && frame.size >= MODBUS_EXCEPTION_RESPONSE_LENGTH -> {
+                val code = frame[2].toInt() and 0xFF
+                details.append(" | exception ${modbusExceptionName(code)}")
+            }
+            function in setOf(MODBUS_READ_HOLDING_REGISTERS, MODBUS_READ_INPUT_REGISTERS) && frame.size >= MODBUS_MIN_RESPONSE_LENGTH -> {
+                val byteCount = frame[2].toInt() and 0xFF
+                details.append(" | dataHex=${readRegisterDataHex(frame, byteCount)}")
+                details.append(" | dataDec=${readRegisterDataDecimals(frame, byteCount)}")
+            }
+            function == MODBUS_WRITE_SINGLE_REGISTER && frame.size == MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH -> {
+                val address = ((frame[2].toInt() and 0xFF) shl 8) or (frame[3].toInt() and 0xFF)
+                val value = ((frame[4].toInt() and 0xFF) shl 8) or (frame[5].toInt() and 0xFF)
+                details.append(" | echoed address=${hex16(address)} value=$value (${hex16(value)})")
+            }
+        }
+
+        return ParsedModbusResponse(frame = frame, crcPass = crcPass, summary = details.toString())
+    }
+
+    private fun readRegisterDataHex(frame: ByteArray, byteCount: Int): String {
+        if (byteCount <= 0 || frame.size < 3 + byteCount + MODBUS_CRC_LENGTH) return "[]"
+        val registers = mutableListOf<String>()
+        var index = 3
+        while (index + 1 < 3 + byteCount) {
+            val value = ((frame[index].toInt() and 0xFF) shl 8) or (frame[index + 1].toInt() and 0xFF)
+            registers.add(hex16(value))
+            index += 2
+        }
+        return registers.joinToString(prefix = "[", postfix = "]")
+    }
+
+    private fun readRegisterDataDecimals(frame: ByteArray, byteCount: Int): String {
+        if (byteCount <= 0 || frame.size < 3 + byteCount + MODBUS_CRC_LENGTH) return "[]"
+        val registers = mutableListOf<String>()
+        var index = 3
+        while (index + 1 < 3 + byteCount) {
+            val value = ((frame[index].toInt() and 0xFF) shl 8) or (frame[index + 1].toInt() and 0xFF)
+            registers.add(value.toString())
+            index += 2
+        }
+        return registers.joinToString(prefix = "[", postfix = "]")
+    }
+
     private fun hasValidModbusCrc(bytes: ByteArray, length: Int): Boolean {
         if (length < MODBUS_MIN_RESPONSE_LENGTH || length > bytes.size) return false
         val expected = modbusCrc16(bytes.copyOf(length - MODBUS_CRC_LENGTH))
@@ -1020,6 +1416,8 @@ class MainActivity : Activity() {
             }
             function == MODBUS_READ_HOLDING_REGISTERS && frame.size >= MODBUS_MIN_RESPONSE_LENGTH ->
                 " = read holding registers response"
+            function == MODBUS_READ_INPUT_REGISTERS && frame.size >= MODBUS_MIN_RESPONSE_LENGTH ->
+                " = read input registers response"
             function == MODBUS_WRITE_SINGLE_REGISTER && frame.size == MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH ->
                 " = write single register response"
             else -> ""
@@ -1045,6 +1443,11 @@ class MainActivity : Activity() {
                 if (byteCount < 2 || frame.size < 5) return null
                 ((frame[3].toInt() and 0xFF) shl 8) or (frame[4].toInt() and 0xFF)
             }
+            MODBUS_READ_INPUT_REGISTERS -> {
+                val byteCount = frame.getOrNull(2)?.toInt()?.and(0xFF) ?: return null
+                if (byteCount < 2 || frame.size < 5) return null
+                ((frame[3].toInt() and 0xFF) shl 8) or (frame[4].toInt() and 0xFF)
+            }
             MODBUS_WRITE_SINGLE_REGISTER -> {
                 if (frame.size < MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH) return null
                 ((frame[4].toInt() and 0xFF) shl 8) or (frame[5].toInt() and 0xFF)
@@ -1063,15 +1466,151 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun canWriteHid(): Boolean {
+        val activeInterface = claimedInterface
+        return outEndpoint != null ||
+            (connection != null && activeInterface?.interfaceClass == UsbConstants.USB_CLASS_HID)
+    }
+
+    private fun writeHidPacket(
+        activeConnection: UsbDeviceConnection,
+        packet: ByteArray,
+        timeoutMillis: Int,
+        label: String
+    ): Int {
+        val endpoint = outEndpoint
+        if (endpoint != null) {
+            val sent = activeConnection.bulkTransfer(endpoint, packet, packet.size, timeoutMillis)
+            logHidPacket("TX", "ep=${hex8(endpoint.address)}", packet, sent, label)
+            return sent
+        }
+
+        val activeInterface = claimedInterface
+        if (activeInterface?.interfaceClass == UsbConstants.USB_CLASS_HID) {
+            val reportId = packet.firstOrNull()?.toInt()?.and(0xFF) ?: 0
+            val sent = activeConnection.controlTransfer(
+                USB_HID_REQUEST_TYPE_OUT,
+                USB_HID_SET_REPORT,
+                (USB_HID_REPORT_TYPE_OUTPUT shl 8) or reportId,
+                activeInterface.id,
+                packet,
+                packet.size,
+                timeoutMillis,
+            )
+            logHidPacket("TX", "control", packet, sent, "$label SET_REPORT")
+            return sent
+        }
+
+        appendLog("No writable HID path.")
+        return -1
+    }
+
+    private fun logHidPacket(
+        direction: String,
+        transport: String,
+        packet: ByteArray,
+        transferCount: Int,
+        label: String? = null
+    ) {
+        val timestamp = timestamp()
+        val reportId = packet.firstOrNull()?.toInt()?.and(0xFF)
+        val reportIdText = reportId?.let(::hex8) ?: "none"
+        val status = if (transferCount >= 0) "bytes=$transferCount" else "error=$transferCount"
+        val labelText = label?.let { " $it" } ?: ""
+        val line = "[$timestamp] $direction$labelText $transport reportId=$reportIdText $status hex=${toHex(packet)}"
+
+        packetMonitorLines.add(line)
+        while (packetMonitorLines.size > MAX_PACKET_MONITOR_LINES) {
+            packetMonitorLines.removeAt(0)
+        }
+
+        if (::packetMonitorText.isInitialized) {
+            packetMonitorText.text = packetMonitorLines.joinToString("\n", postfix = "\n")
+        }
+        if (::packetMonitorScroll.isInitialized) {
+            packetMonitorScroll.post {
+                packetMonitorScroll.fullScroll(ScrollView.FOCUS_DOWN)
+            }
+        }
+
+        appendLog("HID $direction$labelText $transport reportId=$reportIdText $status: ${toHex(packet)}")
+    }
+
+    private fun updateConnectionStatus(connected: Boolean) {
+        if (!::connectionStatusText.isInitialized) return
+
+        if (connected) {
+            val device = selectedDevice
+            connectionStatusText.text = "Status: Connected ${device?.let { "${hex16(it.vendorId)}:${hex16(it.productId)}" } ?: ""}"
+            connectionStatusText.setTextColor(0xFF063B2A.toInt())
+            connectionStatusText.background = roundedRect(0xFFE0F6EA.toInt(), 0xFF64B487.toInt(), 12f)
+            if (::connectButton.isInitialized) {
+                connectButton.text = "Disconnect"
+            }
+        } else {
+            connectionStatusText.text = "Status: Disconnected"
+            connectionStatusText.setTextColor(0xFF5C2626.toInt())
+            connectionStatusText.background = roundedRect(0xFFFFE7E2.toInt(), 0xFFE19A8D.toInt(), 12f)
+            if (::connectButton.isInitialized) {
+                connectButton.text = "Connect"
+            }
+        }
+    }
+
+    private fun promptSaveLogs() {
+        val filename = "sg100-hid-log-${System.currentTimeMillis()}.txt"
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, filename)
+        }
+        startActivityForResult(intent, SAVE_HID_LOG_REQUEST_CODE)
+    }
+
+    private fun saveLogsToUri(uri: Uri) {
+        val content = buildString {
+            appendLine("SG-100 HID Debug Log")
+            appendLine("Saved: ${DateFormat.getDateTimeInstance().format(Date())}")
+            appendLine()
+            appendLine("Packet monitor")
+            if (packetMonitorLines.isEmpty()) {
+                appendLine("(no HID packets captured)")
+            } else {
+                packetMonitorLines.forEach(::appendLine)
+            }
+            appendLine()
+            appendLine("Activity log")
+            if (logLines.isEmpty()) {
+                appendLine("(no activity log entries)")
+            } else {
+                logLines.forEach(::appendLine)
+            }
+        }
+
+        try {
+            contentResolver.openOutputStream(uri)?.use { stream ->
+                stream.write(content.toByteArray(Charsets.UTF_8))
+            } ?: throw IllegalStateException("Could not open selected file.")
+            appendLog("Saved HID debug log.")
+        } catch (error: Exception) {
+            appendLog("Could not save HID debug log: ${error.message}")
+        }
+    }
+
     private fun appendLog(message: String) {
-        val line = "[${DateFormat.getTimeInstance().format(Date())}] $message"
-        logText.append("$line\n")
+        val line = "[${timestamp()}] $message"
+        logLines.add(line)
+        if (::logText.isInitialized) {
+            logText.append("$line\n")
+        }
         if (::logScroll.isInitialized) {
             logScroll.post {
                 logScroll.fullScroll(ScrollView.FOCUS_DOWN)
             }
         }
     }
+
+    private fun timestamp(): String = DateFormat.getTimeInstance().format(Date())
 
     private fun endpointType(type: Int): String {
         return when (type) {
@@ -1187,9 +1726,29 @@ class MainActivity : Activity() {
         }
     }
 
+    private data class ConvertedRegister(
+        val functionCode: Int,
+        val zeroBasedAddress: Int,
+    )
+
+    private data class ModbusReadRequest(
+        val functionCode: Int,
+        val zeroBasedAddress: Int,
+        val frame: ByteArray,
+    )
+
+    private data class ParsedModbusResponse(
+        val frame: ByteArray,
+        val crcPass: Boolean,
+        val summary: String,
+    )
+
     companion object {
         private const val ACTION_USB_PERMISSION = "com.example.sg100usb.USB_PERMISSION"
+        private const val SAVE_HID_LOG_REQUEST_CODE = 1001
+        private const val MAX_PACKET_MONITOR_LINES = 200
         private const val DEFAULT_MODBUS_SLAVE_ID = 1
+        private const val DEFAULT_MODBUS_READ_REGISTER = 30062
         private const val MODBUS_POLL_TEST_FRAME = "01 03 00 00 00 0A C5 CD"
         private const val MODBUS_POLL_TEST_EXPECTED_REPLY = "01 83 02 C0 F1 = Illegal Data Address"
         private const val RX_TIMEOUT_CHECK_MS = 1800L
@@ -1199,7 +1758,10 @@ class MainActivity : Activity() {
         private const val MODBUS_RESPONSE_OVERHEAD = 5
         private const val MODBUS_CRC_LENGTH = 2
         private const val MODBUS_READ_HOLDING_REGISTERS = 0x03
+        private const val MODBUS_READ_INPUT_REGISTERS = 0x04
         private const val MODBUS_WRITE_SINGLE_REGISTER = 0x06
+        private const val MODBUS_READ_REQUEST_LENGTH = 8
+        private const val MODBUS_READ_REQUEST_WITHOUT_CRC_LENGTH = 6
         private const val MODBUS_WRITE_SINGLE_REGISTER_RESPONSE_LENGTH = 8
         private const val MODBUS_WRITE_SINGLE_REGISTER_FRAME_LENGTH = 6
         private const val RPM_GAUGE_MAX = 3000
@@ -1215,6 +1777,9 @@ class MainActivity : Activity() {
         private const val USB_CDC_SET_CONTROL_LINE_STATE = 0x22
         private const val USB_CDC_CONTROL_DTR = 0x01
         private const val USB_CDC_CONTROL_RTS = 0x02
+        private const val USB_HID_REQUEST_TYPE_OUT = 0x21
+        private const val USB_HID_SET_REPORT = 0x09
+        private const val USB_HID_REPORT_TYPE_OUTPUT = 0x02
         private const val SG100_VENDOR_NAME = "hue" + "gli"
 
         /*
