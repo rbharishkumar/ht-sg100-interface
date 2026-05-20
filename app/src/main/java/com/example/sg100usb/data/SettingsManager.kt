@@ -1,0 +1,40 @@
+package com.example.sg100usb.data
+
+import com.example.sg100usb.protocol.RegisterValue
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+
+data class EditableRegister(
+    val register: RegisterValue,
+    val editedValue: Int = register.raw,
+    val dirty: Boolean = false,
+)
+
+class SettingsManager {
+    private val _edited = MutableStateFlow<Map<Int, EditableRegister>>(emptyMap())
+    val edited: StateFlow<Map<Int, EditableRegister>> = _edited.asStateFlow()
+
+    fun loadHoldingRegisters(registers: Map<Int, RegisterValue>) {
+        _edited.update { current ->
+            registers.mapValues { (address, value) ->
+                current[address]?.takeIf { it.dirty } ?: EditableRegister(value)
+            }
+        }
+    }
+
+    fun edit(address: Int, value: Int) {
+        _edited.update { current ->
+            val existing = current[address] ?: return@update current
+            current + (address to existing.copy(editedValue = value.coerceIn(existing.register.definition.min, existing.register.definition.max), dirty = true))
+        }
+    }
+
+    fun markClean(address: Int, actualValue: Int) {
+        _edited.update { current ->
+            val existing = current[address] ?: return@update current
+            current + (address to existing.copy(editedValue = actualValue, dirty = false))
+        }
+    }
+}
