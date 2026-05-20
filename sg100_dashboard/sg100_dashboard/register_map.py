@@ -44,7 +44,7 @@ def low_byte(value: int) -> int:
 
 REGISTER_MAP: dict[int, RegisterDefinition] = {
     30051: RegisterDefinition(30051, "pwm_percent", "PWM % / Actuator Position", "%", identity),
-    30052: RegisterDefinition(30052, "status_bits", "Status Bits", "", identity),
+    30052: RegisterDefinition(30052, "engine_speed_status", "Engine Speed bits 0-11 + Status Bits 12-15", "RPM", identity),
     30053: RegisterDefinition(30053, "requested_speed_rpm", "Requested Speed", "RPM", identity),
     30054: RegisterDefinition(30054, "sync_voltage", "Sync Voltage", "V", identity),
     30055: RegisterDefinition(30055, "firmware_controller_packed", "Firmware MSB + Controller LSB", "", identity),

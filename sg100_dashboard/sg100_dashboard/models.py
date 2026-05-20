@@ -43,7 +43,25 @@ class ParsedPacket:
         return _int_value(self.registers, 30053)
 
     @property
+    def engine_speed_rpm(self) -> int | None:
+        raw = _int_value(self.registers, 30052)
+        if raw is None:
+            return None
+        return raw & 0x0FFF
+
+    @property
     def pwm_percent(self) -> int | None:
+        return _int_value(self.registers, 30051)
+
+    @property
+    def sync_voltage(self) -> float | None:
+        raw = _int_value(self.registers, 30054)
+        if raw is None:
+            return None
+        return raw / 1000.0
+
+    @property
+    def register_30051_raw(self) -> int | None:
         return _int_value(self.registers, 30051)
 
     @property

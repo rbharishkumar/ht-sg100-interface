@@ -7,6 +7,7 @@ same interface and leave the rest of the dashboard unchanged.
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -41,8 +42,8 @@ class HidApiTransport(HidTransport):
     product_id: int
     path: bytes | None = None
     report_length: int = 64
-    read_timeout_ms: int = 180
-    prepend_report_id: bool = False
+    read_timeout_ms: int = 3000
+    prepend_report_id: bool = True
 
     def __post_init__(self) -> None:
         self._device = None
@@ -59,7 +60,7 @@ class HidApiTransport(HidTransport):
                 device.open_path(self.path)
             else:
                 device.open(self.vendor_id, self.product_id)
-            device.set_nonblocking(False)
+            device.set_nonblocking(True)
         except OSError as exc:
             raise HidTransportError(f"Could not open HID device: {exc}") from exc
         self._device = device
@@ -77,15 +78,33 @@ class HidApiTransport(HidTransport):
         if self._device is None:
             raise HidTransportError("HID device is not open")
 
+        self._flush_pending_reads()
         report = self._build_report(tx_packet)
         written = self._device.write(report)
-        if written <= 0:
-            raise HidTransportError("HID write failed")
+        if written != len(report):
+            raise HidTransportError(f"HID write failed: wrote {written} of {len(report)} bytes")
 
-        rx = bytes(self._device.read(self.report_length, self.read_timeout_ms))
+        deadline = time.monotonic() + (self.read_timeout_ms / 1000.0)
+        rx = b""
+        while time.monotonic() < deadline:
+            rx = bytes(self._device.read(self.report_length))
+            if rx:
+                break
+            time.sleep(0.01)
         if not rx:
-            raise HidTransportError("Timed out waiting for SG-100 response")
+            raise HidTransportError("No HID response from SG-100")
         return self._trim_report_padding(rx)
+
+    def _flush_pending_reads(self) -> int:
+        if self._device is None:
+            return 0
+        flushed = 0
+        while True:
+            old = self._device.read(self.report_length)
+            if not old:
+                break
+            flushed += 1
+        return flushed
 
     def _build_report(self, tx_packet: bytes) -> list[int]:
         if self.prepend_report_id:

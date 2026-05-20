@@ -23,7 +23,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val graphManager = RealTimeGraphManager()
     private val settingsManager = SettingsManager()
     private val repository = RegisterRepository(usbHidManager, packetLogger)
-    private val pollingManager = PollingManager(repository, graphManager, settingsManager, packetLogger, viewModelScope)
+    private val pollingManager = PollingManager(repository, graphManager, packetLogger, viewModelScope)
 
     val usbState: StateFlow<UsbHidState> = usbHidManager.state
     val polling: StateFlow<PollingSnapshot> = pollingManager.snapshot

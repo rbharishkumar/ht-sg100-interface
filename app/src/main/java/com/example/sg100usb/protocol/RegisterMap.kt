@@ -26,14 +26,19 @@ object Sg100Registers {
     const val WRITE_MULTIPLE_REGISTERS = 0x10
     const val INPUT_START = 30051
     const val INPUT_COUNT = 13
+    const val PWM_REGISTER = 30051
+    const val ENGINE_SPEED_REGISTER = 30052
+    const val ENGINE_SPEED_MASK = 0x0FFF
+    const val REQUESTED_SPEED_REGISTER = 30053
+    const val SYNC_VOLTAGE_REGISTER = 30054
     const val HOLDING_START = 40051
     const val HOLDING_COUNT = 27
 
     val input = listOf(
-        RegisterDefinition(30051, "pwm", "PWM / actuator command", "%", 0, 100),
-        RegisterDefinition(30052, "status", "Engine speed + status bits"),
-        RegisterDefinition(30053, "requestedSpeed", "Requested speed", "RPM", 0, 5000),
-        RegisterDefinition(30054, "syncVoltage", "Sync voltage", "V"),
+        RegisterDefinition(30051, "pwm", "PWM % / actuator position", "%", 0, 100),
+        RegisterDefinition(30052, "engineSpeedStatus", "Engine speed bits 0-11 + status bits 12-15", "rpm", 0, 4000),
+        RegisterDefinition(30053, "requestedSpeed", "Requested speed", "RPM", 0, 4000),
+        RegisterDefinition(30054, "syncVoltage", "Sync voltage", "V", 0, 10000),
         RegisterDefinition(30055, "firmwarePacked", "Firmware MSB + controller LSB"),
         RegisterDefinition(30056, "inputStatus", "Input status bits"),
         RegisterDefinition(30057, "actuatorCurrent", "Actuator current"),
@@ -76,10 +81,10 @@ object Sg100Registers {
     ).associateBy { it.address }
 
     val status30052Bits = linkedMapOf(
-        12 to "Droop input",
+        12 to "Droop input status",
         13 to "Actuator overcurrent",
-        14 to "Gain2 selection",
-        15 to "Overspeed",
+        14 to "Gain2 selection input",
+        15 to "Overspeed occurred",
     )
 
     val input30056Bits = linkedMapOf(

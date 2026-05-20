@@ -18,7 +18,7 @@ class PollingWorker(QObject):
     state_changed = Signal(str)
     finished = Signal()
 
-    def __init__(self, transport: HidTransport, interval_ms: int = 250) -> None:
+    def __init__(self, transport: HidTransport, interval_ms: int = 1000) -> None:
         super().__init__()
         self.transport = transport
         self.interval_ms = interval_ms
@@ -67,7 +67,7 @@ class PollingController(QObject):
     error = Signal(str)
     state_changed = Signal(str)
 
-    def __init__(self, transport: HidTransport, interval_ms: int = 250) -> None:
+    def __init__(self, transport: HidTransport, interval_ms: int = 1000) -> None:
         super().__init__()
         self._thread = QThread()
         self._worker = PollingWorker(transport, interval_ms)

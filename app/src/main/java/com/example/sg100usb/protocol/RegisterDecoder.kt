@@ -21,6 +21,18 @@ data class DecodedRegisterBlock(
     fun value(address: Int): Int = registers[address]?.raw ?: 0
 }
 
+val DecodedRegisterBlock.engineSpeedRpm: Int
+    get() = value(Sg100Registers.ENGINE_SPEED_REGISTER) and Sg100Registers.ENGINE_SPEED_MASK
+
+val DecodedRegisterBlock.requestedSpeedRpm: Int
+    get() = value(Sg100Registers.REQUESTED_SPEED_REGISTER)
+
+val DecodedRegisterBlock.pwmOrActuatorPercent: Int
+    get() = value(Sg100Registers.PWM_REGISTER)
+
+val DecodedRegisterBlock.syncVoltage: Double
+    get() = value(Sg100Registers.SYNC_VOLTAGE_REGISTER) / 1000.0
+
 data class WriteResponse(
     val functionCode: Int,
     val registerOffset: Int,

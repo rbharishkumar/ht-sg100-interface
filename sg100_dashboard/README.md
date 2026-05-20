@@ -22,9 +22,11 @@ pip install -r requirements.txt
 Run:
 
 ```powershell
-python -m sg100_dashboard.main --vid 04D8 --pid F0C7
+python -m sg100_dashboard.main --vid 04D8 --pid F1BB
 ```
 
 The default read request is function `04`, start address `30051`, quantity `13`.
+The HID write is a strict 64-byte report: report id `00`, then the Modbus frame,
+then zero padding, matching the known-working SG100 terminal.
 If your existing HID layer is already working, adapt it to `HidTransport` by implementing
 `open()`, `close()`, `is_open`, and `exchange(tx_packet)`.

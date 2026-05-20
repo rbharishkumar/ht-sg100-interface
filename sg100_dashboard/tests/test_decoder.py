@@ -1,5 +1,6 @@
 from sg100_dashboard.decoder import (
     build_read_registers_request,
+    crc16_modbus,
     decode_sg100_packet,
     from_hex,
     parse_register_block,
@@ -41,7 +42,10 @@ def test_crc_and_register_alignment():
 
 def test_decode_sg100_packet():
     packet = decode_sg100_packet(from_hex(SAMPLE))
+    assert packet.engine_speed_rpm == 0
     assert packet.requested_speed_rpm == 1499
+    assert packet.pwm_percent == 0
+    assert packet.sync_voltage == 0.0
     assert packet.registers[30052].raw == 0x4000
     assert packet.status.flags["Gain2 selection input"] is True
     assert packet.status.flags["Overspeed occurred"] is False
@@ -53,3 +57,57 @@ def test_decode_sg100_packet():
 
 def test_default_request_crc():
     assert build_read_registers_request().hex(" ").upper() == "01 04 00 32 00 0D 90 00"
+
+
+def test_engine_speed_uses_register_30052_low_12_bits():
+    words = [
+        0x0000,
+        0x8ABC,
+        0x05DB,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x00FB,
+        0x0037,
+    ]
+    payload = b"".join(word.to_bytes(2, "big") for word in words)
+    body = bytes([0x01, 0x04, len(payload)]) + payload
+    crc = crc16_modbus(body)
+    frame = body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+
+    packet = decode_sg100_packet(frame)
+
+    assert packet.registers[30052].raw == 0x8ABC
+    assert packet.engine_speed_rpm == 0x0ABC
+
+
+def test_sync_voltage_is_scaled_to_thousandths():
+    words = [
+        0x0032,
+        0x0000,
+        0x05DB,
+        0x0FA8,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x0000,
+        0x00FB,
+        0x0037,
+    ]
+    payload = b"".join(word.to_bytes(2, "big") for word in words)
+    body = bytes([0x01, 0x04, len(payload)]) + payload
+    crc = crc16_modbus(body)
+    frame = body + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+
+    packet = decode_sg100_packet(frame)
+
+    assert packet.pwm_percent == 50
+    assert packet.sync_voltage == 4.008

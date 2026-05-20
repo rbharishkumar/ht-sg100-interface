@@ -2,6 +2,7 @@ package com.example.sg100usb.data
 
 import com.example.sg100usb.protocol.DecodedRegisterBlock
 import com.example.sg100usb.protocol.PacketLogger
+import com.example.sg100usb.protocol.engineSpeedRpm
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -23,7 +24,6 @@ data class PollingSnapshot(
 class PollingManager(
     private val repository: RegisterRepository,
     private val graphManager: RealTimeGraphManager,
-    private val settingsManager: SettingsManager,
     private val packetLogger: PacketLogger,
     private val scope: CoroutineScope,
 ) {
@@ -31,25 +31,21 @@ class PollingManager(
     val snapshot: StateFlow<PollingSnapshot> = _snapshot.asStateFlow()
     private var job: Job? = null
 
-    fun start(intervalMs: Long = 250L) {
+    fun start(intervalMs: Long = 1_000L) {
         if (job?.isActive == true) return
-        packetLogger.message("POLL", "Started 250 ms SG-100 polling")
+        packetLogger.message("POLL", "Started 1 s SG-100 input polling: 01 04 00 32 00 0D 90 00")
         job = scope.launch {
             while (isActive) {
                 val elapsed = measureTimeMillis {
                     runCatching {
                         val input = repository.readInputRegisters()
-                        val holding = runCatching { repository.readHoldingRegisters() }
-                            .onFailure { packetLogger.message("HOLDING READ", it.message ?: "Holding register read failed") }
-                            .getOrNull()
-                        val rpm = input.value(30053)
-                        val pwm = input.value(30051)
+                        val rpm = input.engineSpeedRpm
+                        val pwm = input.value(30051).coerceIn(0, 100)
                         val current = input.value(30057)
                         graphManager.add(rpm, pwm, current)
-                        holding?.let { settingsManager.loadHoldingRegisters(it.registers) }
                         _snapshot.value = PollingSnapshot(
                             input = input,
-                            holding = holding ?: _snapshot.value.holding,
+                            holding = _snapshot.value.holding,
                             pollingRateHz = 1000f / intervalMs,
                             controllerOnline = true,
                         )

@@ -66,9 +66,14 @@ import com.example.sg100usb.data.PollingSnapshot
 import com.example.sg100usb.protocol.PacketLogEntry
 import com.example.sg100usb.protocol.RegisterControl
 import com.example.sg100usb.protocol.Sg100Registers
+import com.example.sg100usb.protocol.engineSpeedRpm
 import com.example.sg100usb.protocol.hex16
+import com.example.sg100usb.protocol.pwmOrActuatorPercent
 import com.example.sg100usb.protocol.render
+import com.example.sg100usb.protocol.requestedSpeedRpm
+import com.example.sg100usb.protocol.syncVoltage
 import com.example.sg100usb.usb.UsbHidState
+import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -136,7 +141,7 @@ fun Sg100App(viewModel: DashboardViewModel) {
 @Composable
 private fun PcTabStrip(screen: Int, onScreenChange: (Int) -> Unit) {
     val tabs = listOf("MONITOR", "TRENDS", "SETTINGS", "DEBUG")
-        TabRow(
+    TabRow(
         selectedTabIndex = screen,
         containerColor = Color(0xFFF3F6F8),
         contentColor = Accent,
@@ -214,7 +219,7 @@ private fun HeaderBar(
                 colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black),
                 shape = RoundedCornerShape(4.dp),
             ) {
-                Text("START POLL", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                Text("START", fontWeight = FontWeight.Black, fontSize = 12.sp)
             }
             Button(
                 modifier = Modifier.weight(0.72f).height(42.dp),
@@ -232,9 +237,10 @@ private fun HeaderBar(
 @Composable
 private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: List<PacketLogEntry>) {
     val input = snapshot.input
-    val rpm = input?.value(30053) ?: 0
-    val pwm = input?.value(30051) ?: 0
-    val sync = input?.value(30054) ?: 0
+    val rpm = input?.engineSpeedRpm ?: 0
+    val requestedRpm = input?.requestedSpeedRpm ?: 0
+    val pwm = input?.pwmOrActuatorPercent ?: 0
+    val sync = input?.syncVoltage ?: 0.0
     val current = input?.value(30057) ?: 0
     val position = input?.value(30058) ?: 0
 
@@ -248,7 +254,7 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
             item {
                 EmptyStateCard(
                     usb = usb,
-                    message = snapshot.error ?: "Connect the SG-100 and press Poll to start live Modbus/HID decoding."
+                    message = snapshot.error ?: "Connect the SG-100 and press Start to read live Modbus/HID data."
                 )
             }
         }
@@ -258,6 +264,7 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
         item {
             TelemetryOverview(
                 rpm = rpm,
+                requestedRpm = requestedRpm,
                 pwm = pwm,
                 sync = sync,
                 current = current,
@@ -271,19 +278,19 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
                 if (maxWidth < 560.dp) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         IndustrialCard(Modifier.weight(1f).height(185.dp)) {
-                            Gauge("REQUESTED RPM", rpm, 3000, Accent)
+                            Gauge("ENGINE RPM", rpm, 4000, Accent)
                         }
                         IndustrialCard(Modifier.weight(1f).height(185.dp)) {
-                            Gauge("PWM %", pwm, 100, Amber)
+                            Gauge("PWM / POS", pwm, 100, Amber)
                         }
                     }
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                         IndustrialCard(Modifier.weight(1.4f).height(290.dp)) {
-                            Gauge("REQUESTED RPM", rpm, 3000, Accent)
+                            Gauge("ENGINE RPM", rpm, 4000, Accent)
                         }
                         IndustrialCard(Modifier.weight(1f).height(290.dp)) {
-                            Gauge("PWM %", pwm, 100, Amber)
+                            Gauge("PWM / POS", pwm, 100, Amber)
                         }
                     }
                 }
@@ -294,10 +301,10 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
                 SectionTitle("Status Panel")
                 Spacer(Modifier.height(10.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Led("Overspeed", input?.statusBits?.get("Overspeed") == true)
+                    Led("Overspeed", input?.statusBits?.get("Overspeed occurred") == true)
                     Led("Overcurrent", input?.statusBits?.get("Actuator overcurrent") == true)
-                    Led("Gain2", input?.statusBits?.get("Gain2 selection") == true)
-                    Led("Droop", input?.statusBits?.get("Droop input") == true)
+                    Led("Gain2", input?.statusBits?.get("Gain2 selection input") == true)
+                    Led("Droop", input?.statusBits?.get("Droop input status") == true)
                     Led("USB Connected", usb.connected)
                     Led("Controller Online", snapshot.controllerOnline)
                 }
@@ -315,8 +322,9 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
 @Composable
 private fun TelemetryOverview(
     rpm: Int,
+    requestedRpm: Int,
     pwm: Int,
-    sync: Int,
+    sync: Double,
     current: Int,
     position: Int,
     firmware: String,
@@ -326,11 +334,13 @@ private fun TelemetryOverview(
         SectionTitle("Live Telemetry")
         Spacer(Modifier.height(8.dp))
         Column {
-            TelemetryRow("Requested Speed", "$rpm RPM", "PWM Output", "$pwm %")
+            TelemetryRow("Engine Speed", "$rpm RPM", "Requested Speed", "$requestedRpm RPM")
             Rule()
-            TelemetryRow("Actuator Current", current.toString(), "Actuator Position", "$position %")
+            TelemetryRow("PWM / Position", "$pwm %", "Actuator Position", "$position %")
             Rule()
-            TelemetryRow("Sync Voltage", "$sync V", "Firmware / Type", "$firmware / $controller")
+            TelemetryRow("Actuator Current", current.toString(), "Sync Voltage", "${String.format(Locale.US, "%.3f", sync)} V")
+            Rule()
+            TelemetryRow("Firmware / Type", "$firmware / $controller", "RX Block", "30051..30063")
         }
     }
 }
@@ -393,8 +403,8 @@ private fun LiveStatusPanel(
         ) {
             val visibleLogs = logs.takeLast(6)
             if (visibleLogs.isEmpty()) {
-                Text("No packets yet. Tap Connect, then Start Poll.", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                Text("The app will show TX, RX, CRC, and errors here.", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                Text("No packets yet. Tap Connect, then Start.", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                Text("TX: 01 04 00 32 00 0D 90 00", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             } else {
                 visibleLogs.forEach { entry ->
                     Text(entry.render(), color = Color(0xFFD7FFF1), fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -450,7 +460,7 @@ private fun ConfigurationScreen(
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Holding Register Configuration", color = CardText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text("Edits are written with Modbus function 06. Polling refreshes controller values continuously.", color = Muted)
+            Text("Edits are written with Modbus function 06. Start polling reads live input block 30051..30063.", color = Muted)
         }
         items<EditableRegister>(settings.values.sortedBy { it.register.definition.address }) { editable ->
             ConfigRow(editable, onEdit, onWrite)
@@ -552,7 +562,7 @@ private fun EmptyStateCard(usb: UsbHidState, message: String) {
                 Text("Waiting for SG-100 live data", color = CardText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(message, color = Muted)
                 Spacer(Modifier.height(8.dp))
-                Text("Expected RX: 01 04 1A ... B5 C8", color = Cyan, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                Text("Start sends TX: 01 04 00 32 00 0D 90 00", color = Cyan, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             }
         }
     }

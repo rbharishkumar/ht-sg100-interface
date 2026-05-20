@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
         title.setObjectName("title")
         self.connection = QLabel("Disconnected")
         self.connection.setObjectName("connectionBadge")
-        self.start_button = QPushButton("Start Polling")
+        self.start_button = QPushButton("Start")
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         header.addWidget(title)
@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
 
         gauge_box = QGroupBox("Engine Speed")
         gauge_layout = QVBoxLayout(gauge_box)
-        self.rpm_gauge = RpmGauge()
+        self.rpm_gauge = RpmGauge(maximum=4000)
         self.engine_speed_text = QLabel("N/A")
         self.engine_speed_text.setObjectName("largeReadout")
         gauge_layout.addWidget(self.rpm_gauge)
@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         metrics = [
             ("requested_speed", "Requested Speed", "RPM"),
             ("pwm", "PWM / Actuator Cmd", "%"),
+            ("sync_voltage", "Sync Voltage", "V"),
             ("actuator_current", "Actuator Current", ""),
             ("actuator_position", "Actuator Position", ""),
             ("firmware", "Firmware Version", ""),
@@ -187,11 +188,15 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def update_from_packet(self, packet: ParsedPacket) -> None:
+        engine_speed = packet.engine_speed_rpm
         requested = packet.requested_speed_rpm
-        self.rpm_gauge.set_rpm(requested)
-        self.engine_speed_text.setText("N/A engine feedback register in current block")
+        self.rpm_gauge.set_rpm(engine_speed)
+        self.engine_speed_text.setText("N/A" if engine_speed is None else f"{engine_speed} RPM")
         self.metric_cards["requested_speed"].set_value(requested)
         self.metric_cards["pwm"].set_value(packet.pwm_percent)
+        self.metric_cards["sync_voltage"].set_value(
+            None if packet.sync_voltage is None else f"{packet.sync_voltage:.3f}"
+        )
         self.metric_cards["actuator_current"].set_value(packet.actuator_current)
         self.metric_cards["actuator_position"].set_value(packet.actuator_position)
         self.metric_cards["firmware"].set_value(_hex_byte(packet.firmware_version))
@@ -220,7 +225,9 @@ class MainWindow(QMainWindow):
             f"calculated=0x{packet.crc_calculated:04X}"
         )
         self.raw_label.setText(packet.rx_hex)
-        self.log.appendPlainText(f"{packet.received_at:%H:%M:%S.%f} RX OK requested={requested} rpm")
+        self.log.appendPlainText(
+            f"{packet.received_at:%H:%M:%S.%f} RX OK engine={engine_speed} rpm requested={requested} rpm"
+        )
 
     @Slot(str, str)
     def update_raw_exchange(self, tx_hex: str, rx_hex: str) -> None:
