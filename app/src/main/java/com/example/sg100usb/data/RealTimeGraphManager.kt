@@ -3,7 +3,7 @@ package com.example.sg100usb.data
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import java.util.ArrayDeque
 
 data class GraphPoint(
     val timeMillis: Long,
@@ -20,19 +20,47 @@ data class GraphSeries(
 class RealTimeGraphManager(private val maxPoints: Int = 240) {
     private val _series = MutableStateFlow(GraphSeries())
     val series: StateFlow<GraphSeries> = _series.asStateFlow()
+    private val rpmPoints = ArrayDeque<GraphPoint>(maxPoints)
+    private val pwmPoints = ArrayDeque<GraphPoint>(maxPoints)
+    private val currentPoints = ArrayDeque<GraphPoint>(maxPoints)
+    private var zoom = 1f
+    private var lastEmitMs = 0L
 
-    fun add(rpm: Int, pwm: Int, actuatorCurrent: Int) {
+    fun add(rpm: Float, pwm: Float, actuatorCurrent: Float) {
         val now = System.currentTimeMillis()
-        _series.update { current ->
-            current.copy(
-                rpm = (current.rpm + GraphPoint(now, rpm.toFloat())).takeLast(maxPoints),
-                pwm = (current.pwm + GraphPoint(now, pwm.toFloat())).takeLast(maxPoints),
-                actuatorCurrent = (current.actuatorCurrent + GraphPoint(now, actuatorCurrent.toFloat())).takeLast(maxPoints),
-            )
+        synchronized(this) {
+            append(rpmPoints, GraphPoint(now, rpm))
+            append(pwmPoints, GraphPoint(now, pwm))
+            append(currentPoints, GraphPoint(now, actuatorCurrent))
+            if (now - lastEmitMs >= GRAPH_EMIT_INTERVAL_MS) {
+                publishLocked(now)
+            }
         }
     }
 
     fun setZoom(zoom: Float) {
-        _series.update { it.copy(zoom = zoom.coerceIn(1f, 6f)) }
+        synchronized(this) {
+            this.zoom = zoom.coerceIn(1f, 6f)
+            publishLocked(System.currentTimeMillis())
+        }
+    }
+
+    private fun append(points: ArrayDeque<GraphPoint>, point: GraphPoint) {
+        points.addLast(point)
+        while (points.size > maxPoints) points.removeFirst()
+    }
+
+    private fun publishLocked(now: Long) {
+        lastEmitMs = now
+        _series.value = GraphSeries(
+            rpm = rpmPoints.toList(),
+            pwm = pwmPoints.toList(),
+            actuatorCurrent = currentPoints.toList(),
+            zoom = zoom,
+        )
+    }
+
+    private companion object {
+        const val GRAPH_EMIT_INTERVAL_MS = 100L
     }
 }

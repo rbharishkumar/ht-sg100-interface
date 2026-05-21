@@ -44,7 +44,7 @@ class RegisterRepository(
     suspend fun writeSingleRegister(address: Int, value: Int) = withContext(Dispatchers.IO) {
         val tx = ModbusPacketBuilder.writeSingleRegister(1, address, value)
         packetLogger.tx("Write $address=$value", tx)
-        val rx = usbHidManager.exchange(tx)
+        val rx = usbHidManager.exchange(tx, priority = true)
         packetLogger.rx("Write ack", rx)
         val decoded = RegisterDecoder.decode(rx)
         require(decoded is ModbusDecodeResult.WriteAck) { "Controller did not acknowledge write" }
@@ -53,7 +53,7 @@ class RegisterRepository(
     suspend fun writeMultipleRegisters(startAddress: Int, values: List<Int>) = withContext(Dispatchers.IO) {
         val tx = ModbusPacketBuilder.writeMultipleRegisters(1, startAddress, values)
         packetLogger.tx("Write multiple $startAddress count=${values.size}", tx)
-        val rx = usbHidManager.exchange(tx)
+        val rx = usbHidManager.exchange(tx, priority = true)
         packetLogger.rx("Write multiple ack", rx)
         val decoded = RegisterDecoder.decode(rx)
         require(decoded is ModbusDecodeResult.WriteAck) { "Controller did not acknowledge multiple write" }

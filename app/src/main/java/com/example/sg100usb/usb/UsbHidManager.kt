@@ -13,13 +13,25 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Build
-import android.os.SystemClock
 import com.example.sg100usb.protocol.hex8
 import com.example.sg100usb.protocol.hex16
+import com.example.sg100usb.protocol.RegisterDecoder
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class UsbDeviceInfo(
     val name: String = "No SG-100 connected",
@@ -43,6 +55,12 @@ private data class CandidateDevice(
     val reason: String,
 )
 
+private data class HidCommand(
+    val packet: ByteArray,
+    val timeoutMs: Int,
+    val response: CompletableDeferred<ByteArray>,
+)
+
 class UsbHidManager(private val context: Context) {
     private val appContext = context.applicationContext
     private val usbManager = appContext.getSystemService(USB_SERVICE) as UsbManager
@@ -54,6 +72,15 @@ class UsbHidManager(private val context: Context) {
     private var inEndpoint: UsbEndpoint? = null
     private var outEndpoint: UsbEndpoint? = null
     private var pendingDevice: UsbDevice? = null
+    private var preferredReportIdShape: Boolean? = null
+    private var rxJob: Job? = null
+    private var txJob: Job? = null
+    private var activeCommand: HidCommand? = null
+
+    private val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val priorityTxQueue = Channel<HidCommand>(TX_QUEUE_CAPACITY)
+    private val pollingTxQueue = Channel<HidCommand>(TX_QUEUE_CAPACITY)
+    private val rxQueue = Channel<ByteArray>(RX_QUEUE_CAPACITY)
 
     private val permissionIntent: PendingIntent by lazy {
         PendingIntent.getBroadcast(
@@ -166,6 +193,7 @@ class UsbHidManager(private val context: Context) {
         claimedInterface = hidInterface
         inEndpoint = endpoints.first
         outEndpoint = endpoints.second
+        startWorkers(conn, endpoints.first, endpoints.second)
         _state.value = UsbHidState(
             connected = true,
             deviceInfo = UsbDeviceInfo(
@@ -181,45 +209,27 @@ class UsbHidManager(private val context: Context) {
         )
     }
 
-    @Synchronized
-    fun exchange(packet: ByteArray, timeoutMs: Int = 10000): ByteArray {
-        val conn = connection ?: error("USB HID is not connected")
-        val input = inEndpoint ?: error("No HID IN endpoint")
-        val out = outEndpoint ?: error("No HID OUT endpoint selected. Debug tab shows the detected interfaces.")
-        val attempts = mutableListOf<String>()
-
-        flushPendingReads(conn, input)
-        val terminalStyleReport = outputReport(packet, includeReportId = true)
-        val terminalStyleWritten = conn.bulkTransfer(out, terminalStyleReport, terminalStyleReport.size, WRITE_TIMEOUT_MS)
-        attempts += "with report id wrote $terminalStyleWritten/${terminalStyleReport.size}"
-        if (terminalStyleWritten > 0) {
-            readHidResponse(conn, input, timeoutMs)?.let { return it }
+    suspend fun exchange(
+        packet: ByteArray,
+        timeoutMs: Int = RESPONSE_TIMEOUT_MS,
+        priority: Boolean = false,
+    ): ByteArray {
+        if (connection == null || inEndpoint == null || outEndpoint == null) {
+            error("USB HID is not connected")
         }
-
-        flushPendingReads(conn, input)
-        val directEndpointReport = outputReport(packet, includeReportId = false)
-        val directWritten = conn.bulkTransfer(out, directEndpointReport, directEndpointReport.size, WRITE_TIMEOUT_MS)
-        attempts += "without report id wrote $directWritten/${directEndpointReport.size}"
-        if (directWritten > 0) {
-            readHidResponse(conn, input, timeoutMs)?.let { return it }
+        val command = HidCommand(packet, timeoutMs, CompletableDeferred())
+        val result = if (priority) {
+            priorityTxQueue.trySend(command)
+        } else {
+            pollingTxQueue.trySend(command)
         }
-
-        error("No HID response after ${timeoutMs}ms (${attempts.joinToString("; ")})")
-    }
-
-    private fun readHidResponse(conn: UsbDeviceConnection, input: UsbEndpoint, timeoutMs: Int): ByteArray? {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        while (SystemClock.elapsedRealtime() < deadline) {
-            val buffer = ByteArray(HID_REPORT_LENGTH)
-            val count = conn.bulkTransfer(input, buffer, buffer.size, READ_SLICE_TIMEOUT_MS)
-            if (count > 0) return buffer.copyOf(count)
-            Thread.sleep(READ_POLL_SLEEP_MS)
-        }
-        return null
+        if (result.isFailure) error("USB command queue is full")
+        return command.response.await()
     }
 
     @Synchronized
     fun close() {
+        stopWorkers()
         val conn = connection
         val intf = claimedInterface
         if (conn != null && intf != null) conn.releaseInterface(intf)
@@ -228,12 +238,119 @@ class UsbHidManager(private val context: Context) {
         claimedInterface = null
         inEndpoint = null
         outEndpoint = null
+        preferredReportIdShape = null
         _state.value = UsbHidState(message = "Disconnected")
     }
 
     fun dispose() {
         close()
+        workerScope.coroutineContext[Job]?.cancel()
         runCatching { appContext.unregisterReceiver(receiver) }
+    }
+
+    private fun startWorkers(conn: UsbDeviceConnection, input: UsbEndpoint?, out: UsbEndpoint?) {
+        if (input == null || out == null) return
+        stopWorkers()
+        drainRxQueue()
+        rxJob = workerScope.launch {
+            while (isActive) {
+                val buffer = ByteArray(HID_REPORT_LENGTH)
+                val count = conn.bulkTransfer(input, buffer, buffer.size, RX_READ_TIMEOUT_MS)
+                if (count > 0) {
+                    rxQueue.trySend(buffer.copyOf(count))
+                }
+            }
+        }
+        txJob = workerScope.launch {
+            while (isActive) {
+                val command = nextCommand()
+                processCommand(conn, out, command)
+            }
+        }
+    }
+
+    private fun stopWorkers() {
+        val jobs = listOfNotNull(rxJob, txJob)
+        rxJob = null
+        txJob = null
+        if (jobs.isNotEmpty()) {
+            runBlocking {
+                jobs.forEach { it.cancelAndJoin() }
+            }
+        }
+        activeCommand?.response?.completeExceptionally(IllegalStateException("USB connection closed"))
+        activeCommand = null
+        drainTxQueue(priorityTxQueue)
+        drainTxQueue(pollingTxQueue)
+        drainRxQueue()
+    }
+
+    private suspend fun nextCommand(): HidCommand {
+        priorityTxQueue.tryReceive().getOrNull()?.let { return it }
+        return select {
+            priorityTxQueue.onReceive { it }
+            pollingTxQueue.onReceive { it }
+        }
+    }
+
+    private suspend fun processCommand(conn: UsbDeviceConnection, out: UsbEndpoint, command: HidCommand) {
+        activeCommand = command
+        try {
+            val attempts = mutableListOf<String>()
+            val reportShapes = preferredReportIdShape
+                ?.let { listOf(it, !it) }
+                ?: listOf(true, false)
+
+            drainRxQueue()
+            for (includeReportId in reportShapes) {
+                val report = outputReport(command.packet, includeReportId)
+                val written = conn.bulkTransfer(out, report, report.size, WRITE_TIMEOUT_MS)
+                attempts += "${if (includeReportId) "with" else "without"} report id wrote $written/${report.size}"
+                if (written <= 0) continue
+
+                val response = waitForResponse(command.timeoutMs)
+                if (response != null) {
+                    preferredReportIdShape = includeReportId
+                    command.response.complete(response)
+                    return
+                }
+            }
+
+            command.response.completeExceptionally(
+                IllegalStateException("No HID response after ${command.timeoutMs}ms (${attempts.joinToString("; ")})")
+            )
+        } finally {
+            if (!command.response.isCompleted) {
+                command.response.completeExceptionally(IllegalStateException("USB command cancelled"))
+            }
+            if (activeCommand == command) activeCommand = null
+        }
+    }
+
+    private suspend fun waitForResponse(timeoutMs: Int): ByteArray? {
+        var validResponse: ByteArray? = null
+        withTimeoutOrNull(timeoutMs.toLong()) {
+            while (validResponse == null) {
+                val response = rxQueue.receive()
+                if (RegisterDecoder.extractFrame(response) != null) {
+                    validResponse = response
+                }
+            }
+        }
+        return validResponse
+    }
+
+    private fun drainRxQueue() {
+        while (rxQueue.tryReceive().isSuccess) {
+            // Keep only responses that arrive after the current TX command.
+        }
+    }
+
+    private fun drainTxQueue(queue: Channel<HidCommand>) {
+        while (true) {
+            val command = queue.tryReceive().getOrNull() ?: return
+            command.response.completeExceptionally(IllegalStateException("USB connection closed"))
+        }
     }
 
     private fun findBestDevice(): CandidateDevice? {
@@ -316,29 +433,17 @@ class UsbHidManager(private val context: Context) {
         }
     }
 
-    private fun flushPendingReads(conn: UsbDeviceConnection, input: UsbEndpoint): Int {
-        var flushed = 0
-        val deadline = SystemClock.elapsedRealtime() + FLUSH_TIMEOUT_MS
-        while (SystemClock.elapsedRealtime() < deadline) {
-            val buffer = ByteArray(HID_REPORT_LENGTH)
-            val count = conn.bulkTransfer(input, buffer, buffer.size, FLUSH_READ_TIMEOUT_MS)
-            if (count <= 0) break
-            flushed += 1
-        }
-        return flushed
-    }
-
     private fun describeEndpoint(endpoint: UsbEndpoint?): String? =
         endpoint?.let { "${it.address.hex8()} max=${it.maxPacketSize}" }
 
     companion object {
         private const val ACTION_USB_PERMISSION = "com.example.sg100usb.USB_PERMISSION"
         private const val HID_REPORT_LENGTH = 64
-        private const val WRITE_TIMEOUT_MS = 1500
-        private const val READ_SLICE_TIMEOUT_MS = 1
-        private const val READ_POLL_SLEEP_MS = 10L
-        private const val FLUSH_TIMEOUT_MS = 250L
-        private const val FLUSH_READ_TIMEOUT_MS = 1
+        private const val TX_QUEUE_CAPACITY = 32
+        private const val RX_QUEUE_CAPACITY = 64
+        private const val WRITE_TIMEOUT_MS = 250
+        private const val RESPONSE_TIMEOUT_MS = 300
+        private const val RX_READ_TIMEOUT_MS = 20
         private const val SG100_VENDOR_ID = 0x04D8
         private const val SG100_PRODUCT_ID = 0xF1BB
     }

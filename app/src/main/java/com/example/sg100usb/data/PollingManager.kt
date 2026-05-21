@@ -1,7 +1,10 @@
 package com.example.sg100usb.data
 
+import android.os.SystemClock
+import com.example.sg100usb.format.EngineeringFormats
 import com.example.sg100usb.protocol.DecodedRegisterBlock
 import com.example.sg100usb.protocol.PacketLogger
+import com.example.sg100usb.protocol.Sg100Registers
 import com.example.sg100usb.protocol.engineSpeedRpm
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -11,7 +14,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.system.measureTimeMillis
 
 data class PollingSnapshot(
     val input: DecodedRegisterBlock? = null,
@@ -30,38 +32,54 @@ class PollingManager(
     private val _snapshot = MutableStateFlow(PollingSnapshot())
     val snapshot: StateFlow<PollingSnapshot> = _snapshot.asStateFlow()
     private var job: Job? = null
+    private var consecutiveFailures = 0
 
-    fun start(intervalMs: Long = 1_000L) {
+    fun start(intervalMs: Long = 100L) {
         if (job?.isActive == true) return
-        packetLogger.message("POLL", "Started 1 s SG-100 input polling: 01 04 00 32 00 0D 90 00")
+        packetLogger.message("POLL", "Started 100 ms SG-100 input polling: 01 04 00 32 00 0D 90 00")
         job = scope.launch {
+            var nextPollAt = SystemClock.elapsedRealtime()
             while (isActive) {
-                val elapsed = measureTimeMillis {
-                    runCatching {
-                        val input = repository.readInputRegisters()
-                        val rpm = input.engineSpeedRpm
-                        val pwm = input.value(30051).coerceIn(0, 100)
-                        val current = input.value(30057)
-                        graphManager.add(rpm, pwm, current)
-                        _snapshot.value = PollingSnapshot(
-                            input = input,
-                            holding = _snapshot.value.holding,
-                            pollingRateHz = 1000f / intervalMs,
-                            controllerOnline = true,
+                runCatching {
+                    val input = repository.readInputRegisters()
+                    val rpm = input.engineSpeedRpm
+                    val pwm = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER).displayValue.toFloat()
+                    val current = EngineeringFormats.register(input, 30057).displayValue.toFloat()
+                    graphManager.add(rpm.toFloat(), pwm, current)
+                    consecutiveFailures = 0
+                    _snapshot.value = PollingSnapshot(
+                        input = input,
+                        holding = _snapshot.value.holding,
+                        pollingRateHz = 1000f / intervalMs,
+                        controllerOnline = true,
+                        error = null,
+                    )
+                }.onFailure { error ->
+                    consecutiveFailures += 1
+                    packetLogger.message("POLL RETRY", error.message ?: "Unknown polling error")
+                    if (consecutiveFailures >= VISIBLE_FAILURE_THRESHOLD) {
+                        _snapshot.value = _snapshot.value.copy(
+                            controllerOnline = false,
+                            error = "Communication retrying",
                         )
-                    }.onFailure { error ->
-                        packetLogger.message("POLL ERROR", error.message ?: "Unknown polling error")
-                        _snapshot.value = _snapshot.value.copy(controllerOnline = false, error = error.message)
                     }
                 }
-                delay((intervalMs - elapsed).coerceAtLeast(10L))
+                nextPollAt += intervalMs
+                val now = SystemClock.elapsedRealtime()
+                if (nextPollAt < now) nextPollAt = now + intervalMs
+                delay((nextPollAt - now).coerceAtLeast(10L))
             }
         }
     }
 
     fun stop() {
         packetLogger.message("POLL", "Stopped")
+        consecutiveFailures = 0
         job?.cancel()
         job = null
+    }
+
+    private companion object {
+        const val VISIBLE_FAILURE_THRESHOLD = 3
     }
 }

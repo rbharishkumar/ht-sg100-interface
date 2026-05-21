@@ -63,17 +63,14 @@ import com.example.sg100usb.data.EditableRegister
 import com.example.sg100usb.data.GraphPoint
 import com.example.sg100usb.data.GraphSeries
 import com.example.sg100usb.data.PollingSnapshot
+import com.example.sg100usb.format.EngineeringFormats
+import com.example.sg100usb.format.EngineeringValue
 import com.example.sg100usb.protocol.PacketLogEntry
 import com.example.sg100usb.protocol.RegisterControl
 import com.example.sg100usb.protocol.Sg100Registers
 import com.example.sg100usb.protocol.engineSpeedRpm
 import com.example.sg100usb.protocol.hex16
-import com.example.sg100usb.protocol.pwmOrActuatorPercent
-import com.example.sg100usb.protocol.render
-import com.example.sg100usb.protocol.requestedSpeedRpm
-import com.example.sg100usb.protocol.syncVoltage
 import com.example.sg100usb.usb.UsbHidState
-import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -92,11 +89,6 @@ private val CardText = Color(0xFF111820)
 
 @Composable
 fun Sg100App(viewModel: DashboardViewModel) {
-    val usb by viewModel.usbState.collectAsState()
-    val polling by viewModel.polling.collectAsState()
-    val graph by viewModel.graph.collectAsState()
-    val logs by viewModel.packetLog.collectAsState()
-    val settings by viewModel.settings.collectAsState()
     var screen by remember { mutableIntStateOf(0) }
 
     MaterialTheme(
@@ -119,19 +111,28 @@ fun Sg100App(viewModel: DashboardViewModel) {
                     .padding(padding)
                     .background(Background)
             ) {
-                HeaderBar(
-                    usb = usb,
-                    online = polling.controllerOnline,
-                    onConnect = viewModel::connect,
-                    onStart = viewModel::startPolling,
-                    onStop = viewModel::stopPolling,
-                )
+                HeaderBar(viewModel)
                 PcTabStrip(screen = screen, onScreenChange = { screen = it })
                 when (screen) {
-                    0 -> DashboardScreen(polling, usb, logs)
-                    1 -> TrendsScreen(graph, onZoom = viewModel::setGraphZoom)
-                    2 -> ConfigurationScreen(settings, viewModel::editRegister, viewModel::writeRegister)
-                    3 -> DebugScreen(usb, polling, logs)
+                    0 -> {
+                        val usb by viewModel.usbState.collectAsState()
+                        val polling by viewModel.polling.collectAsState()
+                        DashboardScreen(polling, usb)
+                    }
+                    1 -> {
+                        val graph by viewModel.graph.collectAsState()
+                        TrendsScreen(graph, onZoom = viewModel::setGraphZoom)
+                    }
+                    2 -> {
+                        val settings by viewModel.settings.collectAsState()
+                        ConfigurationScreen(settings, viewModel::editRegister, viewModel::writeRegister)
+                    }
+                    3 -> {
+                        val usb by viewModel.usbState.collectAsState()
+                        val polling by viewModel.polling.collectAsState()
+                        val logs by viewModel.packetLog.collectAsState()
+                        DebugScreen(usb, polling, logs)
+                    }
                 }
             }
         }
@@ -164,13 +165,9 @@ private fun PcTabStrip(screen: Int, onScreenChange: (Int) -> Unit) {
 }
 
 @Composable
-private fun HeaderBar(
-    usb: UsbHidState,
-    online: Boolean,
-    onConnect: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-) {
+private fun HeaderBar(viewModel: DashboardViewModel) {
+    val usb by viewModel.usbState.collectAsState()
+    val polling by viewModel.polling.collectAsState()
     Column(
         Modifier
             .fillMaxWidth()
@@ -183,10 +180,6 @@ private fun HeaderBar(
                 Text("HT SG-100", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
                 Text("Speed Governor Service Console", color = Color(0xFFC7D4DA), fontSize = 12.sp)
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("HID", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Black)
-                Text("04D8:F1BB", color = Color(0xFFC7D4DA), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-            }
         }
 
         Row(
@@ -197,8 +190,7 @@ private fun HeaderBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Led("USB", usb.connected)
-            Led("ONLINE", online)
-            Led("STRICT HID", usb.connected)
+            Led("ONLINE", polling.controllerOnline)
         }
 
         Row(
@@ -207,7 +199,7 @@ private fun HeaderBar(
         ) {
             Button(
                 modifier = Modifier.weight(1f).height(42.dp),
-                onClick = onConnect,
+                onClick = viewModel::connect,
                 colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.Black),
                 shape = RoundedCornerShape(4.dp),
             ) {
@@ -215,7 +207,7 @@ private fun HeaderBar(
             }
             Button(
                 modifier = Modifier.weight(1f).height(42.dp),
-                onClick = onStart,
+                onClick = viewModel::startPolling,
                 colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black),
                 shape = RoundedCornerShape(4.dp),
             ) {
@@ -223,7 +215,7 @@ private fun HeaderBar(
             }
             Button(
                 modifier = Modifier.weight(0.72f).height(42.dp),
-                onClick = onStop,
+                onClick = viewModel::stopPolling,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF344650), contentColor = Color.White),
                 shape = RoundedCornerShape(4.dp),
             ) {
@@ -235,14 +227,14 @@ private fun HeaderBar(
 }
 
 @Composable
-private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: List<PacketLogEntry>) {
+private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState) {
     val input = snapshot.input
     val rpm = input?.engineSpeedRpm ?: 0
-    val requestedRpm = input?.requestedSpeedRpm ?: 0
-    val pwm = input?.pwmOrActuatorPercent ?: 0
-    val sync = input?.syncVoltage ?: 0.0
-    val current = input?.value(30057) ?: 0
-    val position = input?.value(30058) ?: 0
+    val requestedRpm = EngineeringFormats.register(input, Sg100Registers.REQUESTED_SPEED_REGISTER)
+    val pwm = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
+    val sync = EngineeringFormats.register(input, Sg100Registers.SYNC_VOLTAGE_REGISTER)
+    val current = EngineeringFormats.register(input, 30057)
+    val position = EngineeringFormats.register(input, 30058)
 
     LazyColumn(
         Modifier
@@ -259,7 +251,7 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
             }
         }
         item {
-            LiveStatusPanel(usb = usb, snapshot = snapshot, logs = logs)
+            LiveStatusPanel(usb = usb, snapshot = snapshot)
         }
         item {
             TelemetryOverview(
@@ -269,7 +261,7 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
                 sync = sync,
                 current = current,
                 position = position,
-                firmware = input?.value(30062)?.hex16() ?: "--",
+                firmware = input?.value(30062)?.toString() ?: "--",
                 controller = input?.value(30063)?.hex16() ?: "--",
             )
         }
@@ -278,19 +270,21 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
                 if (maxWidth < 560.dp) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         IndustrialCard(Modifier.weight(1f).height(185.dp)) {
-                            Gauge("ENGINE RPM", rpm, 4000, Accent)
+                            val rpmValue = EngineeringFormats.rpm(rpm)
+                            Gauge("ENGINE RPM", rpmValue.displayValue, 4000.0, rpmValue.text, Accent)
                         }
                         IndustrialCard(Modifier.weight(1f).height(185.dp)) {
-                            Gauge("PWM / POS", pwm, 100, Amber)
+                            Gauge("PWM / POS", pwm.displayValue, 100.0, pwm.text, Amber)
                         }
                     }
                 } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                         IndustrialCard(Modifier.weight(1.4f).height(290.dp)) {
-                            Gauge("ENGINE RPM", rpm, 4000, Accent)
+                            val rpmValue = EngineeringFormats.rpm(rpm)
+                            Gauge("ENGINE RPM", rpmValue.displayValue, 4000.0, rpmValue.text, Accent)
                         }
                         IndustrialCard(Modifier.weight(1f).height(290.dp)) {
-                            Gauge("PWM / POS", pwm, 100, Amber)
+                            Gauge("PWM / POS", pwm.displayValue, 100.0, pwm.text, Amber)
                         }
                     }
                 }
@@ -322,11 +316,11 @@ private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState, logs: L
 @Composable
 private fun TelemetryOverview(
     rpm: Int,
-    requestedRpm: Int,
-    pwm: Int,
-    sync: Double,
-    current: Int,
-    position: Int,
+    requestedRpm: EngineeringValue,
+    pwm: EngineeringValue,
+    sync: EngineeringValue,
+    current: EngineeringValue,
+    position: EngineeringValue,
     firmware: String,
     controller: String,
 ) {
@@ -334,13 +328,15 @@ private fun TelemetryOverview(
         SectionTitle("Live Telemetry")
         Spacer(Modifier.height(8.dp))
         Column {
-            TelemetryRow("Engine Speed", "$rpm RPM", "Requested Speed", "$requestedRpm RPM")
+            TelemetryRow("Engine Speed", EngineeringFormats.rpm(rpm).text, "Requested Speed", requestedRpm.text)
             Rule()
-            TelemetryRow("PWM / Position", "$pwm %", "Actuator Position", "$position %")
+            TelemetryRow("PWM / Position", pwm.text, "Actuator Position", position.text)
             Rule()
-            TelemetryRow("Actuator Current", current.toString(), "Sync Voltage", "${String.format(Locale.US, "%.3f", sync)} V")
+            TelemetryRow("Actuator Current", current.text, "Sync Voltage", sync.text)
             Rule()
-            TelemetryRow("Firmware / Type", "$firmware / $controller", "RX Block", "30051..30063")
+            TelemetrySingleRow("Firmware Version", firmware)
+            Rule()
+            TelemetrySingleRow("Controller Type", controller)
         }
     }
 }
@@ -350,6 +346,13 @@ private fun TelemetryRow(leftLabel: String, leftValue: String, rightLabel: Strin
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         ValueCell(leftLabel, leftValue, Modifier.weight(1f))
         ValueCell(rightLabel, rightValue, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun TelemetrySingleRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        ValueCell(label, value, Modifier.weight(1f))
     }
 }
 
@@ -379,7 +382,6 @@ private fun Rule() {
 private fun LiveStatusPanel(
     usb: UsbHidState,
     snapshot: PollingSnapshot,
-    logs: List<PacketLogEntry>,
 ) {
     IndustrialCard {
         SectionTitle("Live Activity")
@@ -391,25 +393,6 @@ private fun LiveStatusPanel(
         if (snapshot.error != null) {
             Spacer(Modifier.height(8.dp))
             Text("Last error: ${snapshot.error}", color = Danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(10.dp))
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF121A20), RoundedCornerShape(6.dp))
-                .border(1.dp, Color(0xFF2B3A44), RoundedCornerShape(6.dp))
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            val visibleLogs = logs.takeLast(6)
-            if (visibleLogs.isEmpty()) {
-                Text("No packets yet. Tap Connect, then Start.", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                Text("TX: 01 04 00 32 00 0D 90 00", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-            } else {
-                visibleLogs.forEach { entry ->
-                    Text(entry.render(), color = Color(0xFFD7FFF1), fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
         }
     }
 }
@@ -489,10 +472,25 @@ private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<
             }
         }
         IndustrialCard(Modifier.weight(1f)) {
-            Text("Packet Log", color = CardText, fontWeight = FontWeight.Bold)
+            Text("Communication Log", color = CardText, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
             LazyColumn(Modifier.fillMaxHeight()) {
-                items<PacketLogEntry>(logs.reversed()) { entry ->
-                    Text(entry.render(), color = Color(0xFFD3E4E0), fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                if (logs.isEmpty()) {
+                    item {
+                        Text("No communication yet.", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    }
+                } else {
+                    items(
+                        items = logs,
+                        key = { entry: PacketLogEntry -> entry.id },
+                    ) { entry ->
+                        val color = when (entry.direction) {
+                            "TX" -> Color(0xFFB9E7FF)
+                            "RX" -> Color(0xFFD7FFF1)
+                            else -> Color(0xFFE2E8EC)
+                        }
+                        Text(entry.displayText, color = color, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    }
                 }
             }
         }
@@ -561,8 +559,6 @@ private fun EmptyStateCard(usb: UsbHidState, message: String) {
             Column(Modifier.weight(1f)) {
                 Text("Waiting for SG-100 live data", color = CardText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(message, color = Muted)
-                Spacer(Modifier.height(8.dp))
-                Text("Start sends TX: 01 04 00 32 00 0D 90 00", color = Cyan, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             }
         }
     }
@@ -610,22 +606,23 @@ private fun IndustrialCard(modifier: Modifier = Modifier, content: @Composable C
 }
 
 @Composable
-private fun Gauge(label: String, value: Int, max: Int, color: Color) {
+private fun Gauge(label: String, value: Double, max: Double, displayValue: String, color: Color) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val stroke = 14.dp.toPx()
             val size = min(size.width, size.height * 1.6f) - stroke * 2
             val topLeft = Offset((this.size.width - size) / 2f, stroke)
             drawArc(Color(0xFFD4DEE4), 180f, 180f, false, topLeft, Size(size, size), style = Stroke(stroke, cap = StrokeCap.Round))
-            drawArc(color, 180f, 180f * (value.coerceIn(0, max).toFloat() / max), false, topLeft, Size(size, size), style = Stroke(stroke, cap = StrokeCap.Round))
+            val fraction = (value.coerceIn(0.0, max) / max).toFloat()
+            drawArc(color, 180f, 180f * fraction, false, topLeft, Size(size, size), style = Stroke(stroke, cap = StrokeCap.Round))
             val center = Offset(topLeft.x + size / 2f, topLeft.y + size / 2f)
-            val angle = Math.toRadians((180 + 180f * value.coerceIn(0, max) / max).toDouble())
+            val angle = Math.toRadians((180 + 180f * fraction).toDouble())
             val radius = size / 2f - stroke
             drawLine(CardText, center, Offset(center.x + cos(angle).toFloat() * radius, center.y + sin(angle).toFloat() * radius), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
             drawCircle(CardText, 8.dp.toPx(), center)
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(value.toString(), color = CardText, fontSize = 30.sp, fontWeight = FontWeight.Black)
+            Text(displayValue, color = CardText, fontSize = 30.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(label, color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
     }
@@ -637,15 +634,22 @@ private fun TrendGraph(title: String, points: List<GraphPoint>, color: Color, zo
         Text(title, color = CardText, fontWeight = FontWeight.Bold)
         Canvas(Modifier.fillMaxSize().padding(top = 8.dp)) {
             drawRect(Brush.verticalGradient(listOf(Color(0xFF13211E), Color(0xFF0B1412))))
-            val visible = points.takeLast((240 / zoom).toInt().coerceAtLeast(20))
-            if (visible.size < 2) return@Canvas
-            val maxValue = visible.maxOf { it.value }.coerceAtLeast(1f)
-            val minValue = visible.minOf { it.value }
+            val visibleCount = min(points.size, (240 / zoom).toInt().coerceAtLeast(20))
+            if (visibleCount < 2) return@Canvas
+            val startIndex = points.size - visibleCount
+            var maxValue = points[startIndex].value
+            var minValue = points[startIndex].value
+            for (index in startIndex + 1 until points.size) {
+                val value = points[index].value
+                if (value > maxValue) maxValue = value
+                if (value < minValue) minValue = value
+            }
+            maxValue = maxValue.coerceAtLeast(1f)
             val range = (maxValue - minValue).coerceAtLeast(1f)
-            val stepX = size.width / (visible.size - 1)
-            for (index in 1 until visible.size) {
-                val a = visible[index - 1]
-                val b = visible[index]
+            val stepX = size.width / (visibleCount - 1)
+            for (index in 1 until visibleCount) {
+                val a = points[startIndex + index - 1]
+                val b = points[startIndex + index]
                 val x1 = stepX * (index - 1)
                 val y1 = size.height - ((a.value - minValue) / range) * size.height
                 val x2 = stepX * index
