@@ -9,6 +9,12 @@ build/
 
 # Local machine config
 local.properties
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # OS files
 .DS_Store

@@ -1,5 +1,6 @@
 package com.example.sg100usb
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,5 +16,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             Sg100App(viewModel)
         }
+    }
+
+    // With launchMode="singleTop" Android calls this instead of recreating the activity
+    // when a USB_DEVICE_ATTACHED intent arrives while the app is in the foreground.
+    // UsbHidManager's BroadcastReceiver already handles device attachment independently,
+    // so no additional work is needed here — we just prevent the default re-launch.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
     }
 }

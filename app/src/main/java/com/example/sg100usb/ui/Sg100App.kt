@@ -5,7 +5,7 @@ package com.example.sg100usb.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,25 +18,25 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -50,12 +50,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,63 +75,77 @@ import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
-private val Background = Color(0xFFE8EDF1)
-private val Header = Color(0xFF17232B)
-private val Panel = Color(0xFFF8FAFB)
-private val PanelAlt = Color(0xFFEFF3F5)
-private val Border = Color(0xFFC7D0D7)
-private val Accent = Color(0xFF008064)
-private val Cyan = Color(0xFF1D5F99)
-private val Amber = Color(0xFFB77900)
-private val Danger = Color(0xFFC9363D)
-private val Muted = Color(0xFF596872)
-private val CardText = Color(0xFF111820)
+// ── Light industrial colour palette ──────────────────────────────────────────
+// Inspired by Siemens SIMATIC HMI, Woodward governor software, and
+// professional embedded-control-system interfaces.
+private val PageBg      = Color(0xFFECEFF2)   // cool neutral page background
+private val PanelBg     = Color(0xFFFFFFFF)   // white panel surfaces
+private val CardBg      = Color(0xFFF4F7FA)   // off-white card interiors
+private val GraphBg     = Color(0xFFEBF0F5)   // light blue-grey graph canvas
+private val BorderClr   = Color(0xFFCDD5DD)   // soft card borders
+private val DividerClr  = Color(0xFFDDE3EB)   // strip separators
+private val NavRailBg   = Color(0xFFE4EAF0)   // nav rail — slightly cooler than page
+private val TrackClr    = Color(0xFFDDE4EA)   // gauge / bar track
+private val BlueA       = Color(0xFF1565C0)   // industrial blue — primary
+private val TealA       = Color(0xFF00796B)   // teal — healthy / secondary
+private val AmberA      = Color(0xFFBF5000)   // dark amber — caution
+private val RedA        = Color(0xFFB71C1C)   // dark red — fault
+private val GreenA      = Color(0xFF2E7D32)   // dark green — online
+private val TxtMain     = Color(0xFF1A2530)   // near-black primary text
+private val TxtLabel    = Color(0xFF5E7282)   // grey-blue label text
+private val TxtMuted    = Color(0xFF98A8B3)   // muted secondary text
+private val NeedleClr   = Color(0xFF37474F)   // dark steel needle
 
+// ── Root composable ────────────────────────────────────────────────────────────
 @Composable
 fun Sg100App(viewModel: DashboardViewModel) {
     var screen by remember { mutableIntStateOf(0) }
-
     MaterialTheme(
         colorScheme = lightColorScheme(
-            background = Background,
-            surface = Panel,
-            primary = Accent,
-            secondary = Cyan,
-            tertiary = Amber,
-            onBackground = CardText,
-            onSurface = CardText,
+            background  = PageBg,
+            surface     = PanelBg,
+            primary     = BlueA,
+            secondary   = TealA,
+            tertiary    = AmberA,
+            error       = RedA,
+            onBackground = TxtMain,
+            onSurface    = TxtMain,
         )
     ) {
-        Scaffold(
-            containerColor = Background,
-        ) { padding ->
+        Scaffold(containerColor = PageBg) { padding ->
             Column(
-                modifier = Modifier
+                Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .background(Background)
+                    .background(PageBg)
             ) {
-                HeaderBar(viewModel)
-                PcTabStrip(screen = screen, onScreenChange = { screen = it })
-                when (screen) {
-                    0 -> {
-                        val usb by viewModel.usbState.collectAsState()
-                        val polling by viewModel.polling.collectAsState()
-                        DashboardScreen(polling, usb)
-                    }
-                    1 -> {
-                        val graph by viewModel.graph.collectAsState()
-                        TrendsScreen(graph, onZoom = viewModel::setGraphZoom)
-                    }
-                    2 -> {
-                        val settings by viewModel.settings.collectAsState()
-                        ConfigurationScreen(settings, viewModel::editRegister, viewModel::writeRegister)
-                    }
-                    3 -> {
-                        val usb by viewModel.usbState.collectAsState()
-                        val polling by viewModel.polling.collectAsState()
-                        val logs by viewModel.packetLog.collectAsState()
-                        DebugScreen(usb, polling, logs)
+                AppHeader(viewModel)
+                Row(Modifier.fillMaxSize()) {
+                    NavRail(screen) { screen = it }
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(BorderClr))
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        when (screen) {
+                            0 -> {
+                                val usb     by viewModel.usbState.collectAsState()
+                                val polling by viewModel.polling.collectAsState()
+                                val graph   by viewModel.graph.collectAsState()
+                                MonitorScreen(polling, usb, graph)
+                            }
+                            1 -> {
+                                val graph by viewModel.graph.collectAsState()
+                                TrendsScreen(graph, onZoom = viewModel::setGraphZoom)
+                            }
+                            2 -> {
+                                val settings by viewModel.settings.collectAsState()
+                                ConfigScreen(settings, viewModel::editRegister, viewModel::writeRegister)
+                            }
+                            3 -> {
+                                val usb     by viewModel.usbState.collectAsState()
+                                val polling by viewModel.polling.collectAsState()
+                                val logs    by viewModel.packetLog.collectAsState()
+                                DebugScreen(usb, polling, logs)
+                            }
+                        }
                     }
                 }
             }
@@ -139,360 +153,686 @@ fun Sg100App(viewModel: DashboardViewModel) {
     }
 }
 
+// ── App header ─────────────────────────────────────────────────────────────────
 @Composable
-private fun PcTabStrip(screen: Int, onScreenChange: (Int) -> Unit) {
-    val tabs = listOf("MONITOR", "TRENDS", "SETTINGS", "DEBUG")
-    TabRow(
-        selectedTabIndex = screen,
-        containerColor = Color(0xFFF3F6F8),
-        contentColor = Accent,
-    ) {
-        tabs.forEachIndexed { index, label ->
-            Tab(
-                selected = screen == index,
-                onClick = { onScreenChange(index) },
-                text = {
-                    Text(
-                        label,
-                        color = if (screen == index) Accent else Muted,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun HeaderBar(viewModel: DashboardViewModel) {
-    val usb by viewModel.usbState.collectAsState()
+private fun AppHeader(viewModel: DashboardViewModel) {
+    val usb     by viewModel.usbState.collectAsState()
     val polling by viewModel.polling.collectAsState()
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(Header)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("HT SG-100", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black)
-                Text("Speed Governor Service Console", color = Color(0xFFC7D4DA), fontSize = 12.sp)
-            }
-        }
 
+    val dotColor = when {
+        usb.connected && polling.controllerOnline -> GreenA
+        usb.connected                             -> AmberA
+        else                                      -> TxtMuted
+    }
+    val statusText = when {
+        usb.connected && polling.controllerOnline -> "Device Online"
+        usb.connected                             -> "Connecting to Device"
+        else                                      -> "Device Offline"
+    }
+    val statusColor = if (usb.connected && polling.controllerOnline) GreenA else TxtMuted
+
+    Column(Modifier.fillMaxWidth().background(PanelBg)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .height(56.dp)
+                .padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Led("USB", usb.connected)
-            Led("ONLINE", polling.controllerOnline)
-        }
+            // ── Nameplate ────────────────────────────────────────────
+            Column(Modifier.width(132.dp)) {
+                Text(
+                    "HUEGLI TECH",
+                    color         = Color(0xFF1C3049),
+                    fontSize      = 11.sp,
+                    fontWeight    = FontWeight.Black,
+                    letterSpacing = 1.2.sp,
+                )
+                Text(
+                    "HT-SG100",
+                    color         = TxtMuted,
+                    fontSize      = 9.sp,
+                    fontFamily    = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp,
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Box(Modifier.width(1.dp).height(28.dp).background(DividerClr))
+            Spacer(Modifier.width(14.dp))
 
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Button(
-                modifier = Modifier.weight(1f).height(42.dp),
-                onClick = viewModel::connect,
-                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.Black),
-                shape = RoundedCornerShape(4.dp),
+            // ── Connection state ─────────────────────────────────────
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Text("CONNECT", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                Box(Modifier.size(8.dp).background(dotColor, CircleShape))
+                Text(statusText, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Medium)
             }
-            Button(
-                modifier = Modifier.weight(1f).height(42.dp),
-                onClick = viewModel::startPolling,
-                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black),
-                shape = RoundedCornerShape(4.dp),
-            ) {
-                Text("START", fontWeight = FontWeight.Black, fontSize = 12.sp)
+            if (polling.pollingRateHz > 0f) {
+                Spacer(Modifier.width(12.dp))
+                Box(Modifier.width(1.dp).height(16.dp).background(DividerClr))
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "${"%.1f".format(polling.pollingRateHz)} Hz",
+                    color      = TxtMuted,
+                    fontSize   = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
             }
-            Button(
-                modifier = Modifier.weight(0.72f).height(42.dp),
-                onClick = viewModel::stopPolling,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF344650), contentColor = Color.White),
-                shape = RoundedCornerShape(4.dp),
-            ) {
-                Text("STOP", fontWeight = FontWeight.Black, fontSize = 12.sp)
+
+            // ── Flexible gap — pushes controls to the right ──────────
+            Spacer(Modifier.weight(1f))
+
+            // ── Action controls ──────────────────────────────────────
+            Box(Modifier.width(1.dp).height(28.dp).background(DividerClr))
+            Spacer(Modifier.width(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HdrButton("Connect",       BlueA,             viewModel::connect)
+                HdrButton("Start Polling", TealA,             viewModel::startPolling)
+                HdrButton("Stop Polling",  Color(0xFF4A6070), viewModel::stopPolling)
             }
         }
-        Text(usb.message, color = Color(0xFFC7D4DA), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.fillMaxWidth().height(1.dp).background(BorderClr))
     }
 }
 
-@Composable
-private fun DashboardScreen(snapshot: PollingSnapshot, usb: UsbHidState) {
-    val input = snapshot.input
-    val rpm = input?.engineSpeedRpm ?: 0
-    val requestedRpm = EngineeringFormats.register(input, Sg100Registers.REQUESTED_SPEED_REGISTER)
-    val pwm = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
-    val sync = EngineeringFormats.register(input, Sg100Registers.SYNC_VOLTAGE_REGISTER)
-    val current = EngineeringFormats.register(input, 30057)
-    val position = EngineeringFormats.register(input, 30058)
+// ── Navigation rail ────────────────────────────────────────────────────────────
+private val navItems = listOf("Dashboard", "Trends", "Configure", "Diagnostics")
 
-    LazyColumn(
+@Composable
+private fun NavRail(selected: Int, onSelect: (Int) -> Unit) {
+    Column(
         Modifier
-            .fillMaxSize()
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .width(104.dp)
+            .fillMaxHeight()
+            .background(NavRailBg)
     ) {
-        if (input == null) {
-            item {
-                EmptyStateCard(
-                    usb = usb,
-                    message = snapshot.error ?: "Connect the SG-100 and press Start to read live Modbus/HID data."
+        Spacer(Modifier.height(10.dp))
+        navItems.forEachIndexed { i, label ->
+            val active = selected == i
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .clickable { onSelect(i) }
+                    .background(if (active) BlueA.copy(alpha = 0.09f) else Color.Transparent),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(if (active) BlueA else Color.Transparent)
+                )
+                Text(
+                    label,
+                    color      = if (active) BlueA else TxtLabel,
+                    fontSize   = 12.sp,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier   = Modifier.padding(start = 12.dp, end = 8.dp),
                 )
             }
         }
-        item {
-            LiveStatusPanel(usb = usb, snapshot = snapshot)
-        }
-        item {
-            TelemetryOverview(
-                rpm = rpm,
-                requestedRpm = requestedRpm,
-                pwm = pwm,
-                sync = sync,
-                current = current,
-                position = position,
-                firmware = input?.value(30062)?.toString() ?: "--",
-                controller = input?.value(30063)?.hex16() ?: "--",
-            )
-        }
-        item {
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                if (maxWidth < 560.dp) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        IndustrialCard(Modifier.weight(1f).height(185.dp)) {
-                            val rpmValue = EngineeringFormats.rpm(rpm)
-                            Gauge("ENGINE RPM", rpmValue.displayValue, 4000.0, rpmValue.text, Accent)
-                        }
-                        IndustrialCard(Modifier.weight(1f).height(185.dp)) {
-                            Gauge("PWM / POS", pwm.displayValue, 100.0, pwm.text, Amber)
-                        }
-                    }
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        IndustrialCard(Modifier.weight(1.4f).height(290.dp)) {
-                            val rpmValue = EngineeringFormats.rpm(rpm)
-                            Gauge("ENGINE RPM", rpmValue.displayValue, 4000.0, rpmValue.text, Accent)
-                        }
-                        IndustrialCard(Modifier.weight(1f).height(290.dp)) {
-                            Gauge("PWM / POS", pwm.displayValue, 100.0, pwm.text, Amber)
-                        }
-                    }
-                }
-            }
-        }
-        item {
-            IndustrialCard {
-                SectionTitle("Status Panel")
-                Spacer(Modifier.height(10.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Led("Overspeed", input?.statusBits?.get("Overspeed occurred") == true)
-                    Led("Overcurrent", input?.statusBits?.get("Actuator overcurrent") == true)
-                    Led("Gain2", input?.statusBits?.get("Gain2 selection input") == true)
-                    Led("Droop", input?.statusBits?.get("Droop input status") == true)
-                    Led("USB Connected", usb.connected)
-                    Led("Controller Online", snapshot.controllerOnline)
-                }
-                Spacer(Modifier.height(10.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Sg100Registers.input30056Bits.values.forEach { label: String ->
-                        Led(label, input?.inputBits?.get(label) == true)
-                    }
-                }
-            }
-        }
     }
 }
 
 @Composable
-private fun TelemetryOverview(
-    rpm: Int,
-    requestedRpm: EngineeringValue,
-    pwm: EngineeringValue,
-    sync: EngineeringValue,
-    current: EngineeringValue,
-    position: EngineeringValue,
-    firmware: String,
-    controller: String,
-) {
-    IndustrialCard {
-        SectionTitle("Live Telemetry")
-        Spacer(Modifier.height(8.dp))
-        Column {
-            TelemetryRow("Engine Speed", EngineeringFormats.rpm(rpm).text, "Requested Speed", requestedRpm.text)
-            Rule()
-            TelemetryRow("PWM / Position", pwm.text, "Actuator Position", position.text)
-            Rule()
-            TelemetryRow("Actuator Current", current.text, "Sync Voltage", sync.text)
-            Rule()
-            TelemetrySingleRow("Firmware Version", firmware)
-            Rule()
-            TelemetrySingleRow("Controller Type", controller)
-        }
-    }
-}
-
-@Composable
-private fun TelemetryRow(leftLabel: String, leftValue: String, rightLabel: String, rightValue: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ValueCell(leftLabel, leftValue, Modifier.weight(1f))
-        ValueCell(rightLabel, rightValue, Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun TelemetrySingleRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        ValueCell(label, value, Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun ValueCell(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(label.uppercase(), color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text(value, color = CardText, fontSize = 21.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun SectionTitle(title: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(4.dp).height(18.dp).background(Accent, RoundedCornerShape(2.dp)))
-        Spacer(Modifier.width(8.dp))
-        Text(title, color = CardText, fontSize = 16.sp, fontWeight = FontWeight.Black)
-    }
-}
-
-@Composable
-private fun Rule() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE1E7EB)))
-}
-
-@Composable
-private fun LiveStatusPanel(
-    usb: UsbHidState,
-    snapshot: PollingSnapshot,
-) {
-    IndustrialCard {
-        SectionTitle("Live Activity")
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            StatusBox("USB", if (usb.connected) "CONNECTED" else "DISCONNECTED", usb.connected, Modifier.weight(1f))
-            StatusBox("CONTROLLER", if (snapshot.controllerOnline) "ONLINE" else "WAITING", snapshot.controllerOnline, Modifier.weight(1f))
-        }
-        if (snapshot.error != null) {
-            Spacer(Modifier.height(8.dp))
-            Text("Last error: ${snapshot.error}", color = Danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-private fun StatusBox(label: String, value: String, active: Boolean, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .background(if (active) Color(0xFFEAF7F2) else Color(0xFFFFF6E6), RoundedCornerShape(4.dp))
-            .border(1.dp, if (active) Color(0xFFB9DDD1) else Color(0xFFE7C98B), RoundedCornerShape(4.dp))
-            .padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+private fun HdrButton(label: String, tint: Color, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.height(38.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = tint.copy(alpha = 0.13f),
+            contentColor   = tint,
+        ),
+        shape = RoundedCornerShape(4.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
     ) {
-        Box(Modifier.size(8.dp).background(if (active) Accent else Amber, CircleShape))
-        Column {
-            Text(label, color = Muted, fontSize = 9.sp, fontWeight = FontWeight.Black)
-            Text(value, color = CardText, fontSize = 12.sp, fontWeight = FontWeight.Black)
+        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, letterSpacing = 0.1.sp)
+    }
+}
+
+// ── Monitor screen — three-column command bridge ───────────────────────────────
+@Composable
+private fun MonitorScreen(snapshot: PollingSnapshot, usb: UsbHidState, graph: GraphSeries) {
+    val input  = snapshot.input
+    val rpm    = input?.engineSpeedRpm ?: 0
+    val rpmEv  = EngineeringFormats.rpm(rpm)
+    val pwmEv  = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
+    val reqEv  = EngineeringFormats.register(input, Sg100Registers.REQUESTED_SPEED_REGISTER)
+    val syncEv = EngineeringFormats.register(input, Sg100Registers.SYNC_VOLTAGE_REGISTER)
+    val currEv = EngineeringFormats.register(input, 30057)
+    val posEv  = EngineeringFormats.register(input, 30058)
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(PageBg)) {
+        if (maxWidth >= 680.dp) {
+            Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // ── Left: gauges ──────────────────────────────────────────────
+                Column(
+                    Modifier
+                        .weight(0.26f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SectionLabel("INSTRUMENTS")
+                    Panel(Modifier.weight(1.05f).fillMaxWidth()) {
+                        ArcGauge(
+                            label     = "ENGINE SPEED",
+                            value     = rpmEv.displayValue,
+                            max       = 4000.0,
+                            text      = rpmEv.text,
+                            fillColor = BlueA,
+                            modifier  = Modifier.fillMaxSize(),
+                        )
+                    }
+                    Panel(Modifier.weight(0.95f).fillMaxWidth()) {
+                        ArcGauge(
+                            label     = "PWM / ACTUATOR",
+                            value     = pwmEv.displayValue.coerceAtMost(100.0),
+                            max       = 100.0,
+                            text      = pwmEv.text,
+                            fillColor = AmberA,
+                            modifier  = Modifier.fillMaxSize(),
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        InfoChip("FW", formatFirmware(input?.value(30062)), Modifier.weight(1f))
+                        InfoChip("Controller", formatControllerType(input?.value(30063)), Modifier.weight(1f))
+                    }
+                }
+
+                // ── Centre: telemetry + actuator + status ─────────────────────
+                Column(
+                    Modifier
+                        .weight(0.44f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SectionLabel("LIVE TELEMETRY")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TelCard("ENGINE SPEED",    rpmEv.text,  BlueA,  Modifier.weight(1f))
+                        TelCard("REQUESTED SPEED", reqEv.text,  TxtMain, Modifier.weight(1f))
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TelCard(
+                            label     = "ACTUATOR CURRENT",
+                            value     = currEv.text,
+                            valueColor = if (currEv.outOfRange) RedA else TxtMain,
+                            modifier  = Modifier.weight(1f),
+                        )
+                        TelCard("SYNC VOLTAGE", syncEv.text, TxtMain, Modifier.weight(1f))
+                    }
+                    ActuatorBar(posEv, Modifier.fillMaxWidth())
+                    Spacer(Modifier.weight(1f))
+                    StatusPanel(snapshot, usb)
+                }
+
+                // ── Right: inline trend rails ─────────────────────────────────
+                Column(
+                    Modifier
+                        .weight(0.30f)
+                        .fillMaxHeight(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SectionLabel("REAL-TIME TRENDS")
+                    MiniTrend("ENGINE RPM",      graph.rpm,           BlueA,  graph.zoom, Modifier.weight(1f).fillMaxWidth())
+                    MiniTrend("PWM / ACTUATOR",  graph.pwm,           AmberA, graph.zoom, Modifier.weight(1f).fillMaxWidth())
+                    MiniTrend("ACT. CURRENT",    graph.actuatorCurrent, RedA,  graph.zoom, Modifier.weight(1f).fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        val hz = snapshot.pollingRateHz
+                        Text(
+                            if (hz > 0f) "${"%.1f".format(hz)} Hz" else "—",
+                            color = TxtMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                        )
+                        val ok = snapshot.input?.crc?.ok == true
+                        Text(
+                            "CRC ${if (ok) "OK" else "ERR"}",
+                            color = if (ok) GreenA else RedA,
+                            fontSize = 10.sp, fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        } else {
+            NarrowMonitor(snapshot, usb, rpmEv, pwmEv, reqEv, syncEv, currEv, posEv)
         }
     }
 }
 
+// ── Arc gauge ──────────────────────────────────────────────────────────────────
+@Composable
+private fun ArcGauge(
+    label: String,
+    value: Double,
+    max: Double,
+    text: String,
+    fillColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val strokePx  = 11.dp.toPx()
+            val diam      = min(size.width, size.height * 1.65f) - strokePx * 2f
+            val topLeft   = Offset((size.width - diam) / 2f, strokePx)
+            val arcSz     = Size(diam, diam)
+
+            // Track
+            drawArc(TrackClr, 180f, 180f, false, topLeft, arcSz, style = Stroke(strokePx, cap = StrokeCap.Round))
+
+            // Value arc — transitions through caution and alarm ranges
+            val frac = (value.coerceIn(0.0, max) / max).toFloat()
+            val color = when {
+                frac < 0.70f -> fillColor
+                frac < 0.90f -> AmberA
+                else          -> RedA
+            }
+            if (frac > 0f) {
+                drawArc(color, 180f, 180f * frac, false, topLeft, arcSz, style = Stroke(strokePx, cap = StrokeCap.Round))
+            }
+
+            // Needle — dark steel appearance
+            val cx    = topLeft.x + diam / 2f
+            val cy    = topLeft.y + diam / 2f
+            val angle = Math.toRadians(180.0 + 180.0 * frac)
+            val r     = diam / 2f - strokePx
+            drawLine(
+                NeedleClr,
+                Offset(cx, cy),
+                Offset(cx + cos(angle).toFloat() * r, cy + sin(angle).toFloat() * r),
+                strokeWidth = 2.5.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+            drawCircle(TrackClr,   5.dp.toPx(), Offset(cx, cy))
+            drawCircle(NeedleClr,  3.dp.toPx(), Offset(cx, cy))
+        }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(bottom = 6.dp),
+        ) {
+            Text(
+                text,
+                color = TxtMain,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(label, color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+        }
+    }
+}
+
+// ── Telemetry card ─────────────────────────────────────────────────────────────
+@Composable
+private fun TelCard(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
+    Panel(modifier) {
+        Text(
+            label,
+            color = TxtLabel,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            value,
+            color = valueColor,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+// ── Actuator position bar ──────────────────────────────────────────────────────
+@Composable
+private fun ActuatorBar(ev: EngineeringValue, modifier: Modifier = Modifier) {
+    val raw      = ev.raw
+    val display  = ev.displayValue
+    // For display purposes clamp to 0-100 visually; show raw number in text
+    val barFrac  = (display / 100.0).coerceIn(0.0, 1.0).toFloat()
+    val barColor = when {
+        barFrac < 0.80f -> TealA
+        barFrac < 0.95f -> AmberA
+        else             -> RedA
+    }
+    Panel(modifier) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("ACTUATOR POSITION", color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(ev.text, color = TxtMain, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                if (ev.outOfRange || raw > 100) {
+                    Text("raw $raw", color = AmberA, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+        Spacer(Modifier.height(7.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(14.dp)
+                .background(TrackClr, RoundedCornerShape(3.dp))
+        ) {
+            if (barFrac > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(barFrac)
+                        .fillMaxHeight()
+                        .background(barColor, RoundedCornerShape(3.dp))
+                )
+            }
+        }
+        Spacer(Modifier.height(3.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("0", "25", "50", "75", "100%").forEach {
+                Text(it, color = TxtMuted, fontSize = 8.sp)
+            }
+        }
+    }
+}
+
+// ── Status LED panel ───────────────────────────────────────────────────────────
+// Maps protocol bit-label strings → operator-readable display labels (UI layer only).
+private val inputBitDisplayLabels = mapOf(
+    "Speed2 input"        to "Speed 2 Input",
+    "Speed3 input"        to "Speed 3 Input",
+    "Gain input"          to "Gain Input",
+    "Fn key"              to "Function Key",
+    "Plus key"            to "Plus Key",
+    "Minus key"           to "Minus Key",
+    "Idle input"          to "Idle Input",
+    "Pickup sensor input" to "Pickup Sensor Input",
+)
+
+@Composable
+private fun StatusPanel(snapshot: PollingSnapshot, usb: UsbHidState) {
+    val input = snapshot.input
+    Panel(Modifier.fillMaxWidth()) {
+        Text(
+            "DEVICE STATUS",
+            color         = TxtLabel,
+            fontSize      = 9.sp,
+            fontWeight    = FontWeight.SemiBold,
+            letterSpacing = 0.4.sp,
+        )
+        Spacer(Modifier.height(10.dp))
+
+        // ── Three-column status groups ─────────────────────────────
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            StatusGroup("CONNECTION", Modifier.weight(1f)) {
+                SLed("USB Connection", usb.connected,             GreenA)
+                SLed("Controller",     snapshot.controllerOnline, GreenA)
+            }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(DividerClr))
+            StatusGroup("FAULT CONDITIONS", Modifier.weight(1f)) {
+                SLed("Overspeed",    input?.statusBits?.get("Overspeed occurred")   == true, RedA)
+                SLed("Over Current", input?.statusBits?.get("Actuator overcurrent") == true, RedA)
+            }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(DividerClr))
+            StatusGroup("GOVERNOR MODE", Modifier.weight(1f)) {
+                SLed("Droop",  input?.statusBits?.get("Droop input status")    == true, AmberA)
+                SLed("Gain 2", input?.statusBits?.get("Gain2 selection input") == true, AmberA)
+            }
+        }
+
+        // ── Digital inputs ─────────────────────────────────────────
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(DividerClr))
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "DIGITAL INPUTS",
+            color         = TxtMuted,
+            fontSize      = 8.sp,
+            fontWeight    = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement   = Arrangement.spacedBy(8.dp),
+        ) {
+            Sg100Registers.input30056Bits.values.forEach { protocolLabel ->
+                val displayLabel = inputBitDisplayLabels[protocolLabel] ?: protocolLabel
+                SLed(displayLabel, input?.inputBits?.get(protocolLabel) == true, TealA)
+            }
+        }
+
+        if (snapshot.error != null) {
+            Spacer(Modifier.height(6.dp))
+            Text("⚠ ${snapshot.error}", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun StatusGroup(
+    title: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Text(
+            title,
+            color         = TxtMuted,
+            fontSize      = 8.sp,
+            fontWeight    = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+        )
+        Spacer(Modifier.height(6.dp))
+        Column(
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun SLed(label: String, active: Boolean, activeColor: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(8.dp).background(if (active) activeColor else Color(0xFFCDD5DD), CircleShape))
+        Text(
+            label,
+            color      = if (active) activeColor else TxtLabel,
+            fontSize   = 10.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+// ── Mini trend graph ───────────────────────────────────────────────────────────
+@Composable
+private fun MiniTrend(
+    title: String,
+    points: List<GraphPoint>,
+    color: Color,
+    zoom: Float,
+    modifier: Modifier = Modifier,
+) {
+    val latest = points.lastOrNull()?.value
+    Panel(modifier) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+            if (latest != null) {
+                Text(
+                    "%.1f".format(latest),
+                    color = color,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(GraphBg, RoundedCornerShape(3.dp))
+        ) {
+            drawTrendLine(points, zoom, color, size, strokeDp = 1.5f)
+        }
+    }
+}
+
+// ── Trends tab (full width) ────────────────────────────────────────────────────
 @Composable
 private fun TrendsScreen(graph: GraphSeries, onZoom: (Float) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        IndustrialCard(Modifier.height(130.dp)) {
-            Text("Time Zoom ${"%.1f".format(graph.zoom)}x", color = CardText, fontWeight = FontWeight.Bold)
-            Slider(value = graph.zoom, onValueChange = onZoom, valueRange = 1f..6f)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Panel(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("ZOOM", color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+                Text(
+                    "${"%.1f".format(graph.zoom)}×",
+                    color = BlueA,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.width(36.dp),
+                )
+                Slider(
+                    value = graph.zoom,
+                    onValueChange = onZoom,
+                    valueRange = 1f..6f,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = BlueA,
+                        activeTrackColor = BlueA,
+                        inactiveTrackColor = TrackClr,
+                    ),
+                )
+            }
         }
-        IndustrialCard(Modifier.weight(1f)) {
-            TrendGraph("RPM", graph.rpm, Accent, graph.zoom)
-        }
-        IndustrialCard(Modifier.weight(1f)) {
-            TrendGraph("PWM %", graph.pwm, Amber, graph.zoom)
-        }
-        IndustrialCard(Modifier.weight(1f)) {
-            TrendGraph("Actuator Current", graph.actuatorCurrent, Danger, graph.zoom)
-        }
+        FullTrend("ENGINE RPM",     graph.rpm,             BlueA,  graph.zoom, Modifier.weight(1f).fillMaxWidth())
+        FullTrend("PWM / ACTUATOR", graph.pwm,             AmberA, graph.zoom, Modifier.weight(1f).fillMaxWidth())
+        FullTrend("ACT. CURRENT",   graph.actuatorCurrent, RedA,   graph.zoom, Modifier.weight(1f).fillMaxWidth())
     }
 }
 
 @Composable
-private fun ConfigurationScreen(
+private fun FullTrend(
+    title: String,
+    points: List<GraphPoint>,
+    color: Color,
+    zoom: Float,
+    modifier: Modifier = Modifier,
+) {
+    val latest = points.lastOrNull()?.value
+    Panel(modifier) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = TxtMain, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            if (latest != null) {
+                Text(
+                    "%.2f".format(latest),
+                    color = color,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Canvas(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(GraphBg, RoundedCornerShape(4.dp))
+        ) {
+            drawTrendLine(points, zoom, color, size, strokeDp = 2f)
+        }
+    }
+}
+
+// Shared Canvas drawing logic extracted to avoid duplication
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendLine(
+    points: List<GraphPoint>,
+    zoom: Float,
+    color: Color,
+    canvasSize: Size,
+    strokeDp: Float,
+) {
+    if (canvasSize.height < 2f) return
+    val visible = min(points.size, (240 / zoom).toInt().coerceAtLeast(10))
+    if (visible < 2) return
+    val start = points.size - visible
+    var maxV = points[start].value
+    var minV = points[start].value
+    for (i in start + 1 until points.size) {
+        val v = points[i].value
+        if (v > maxV) maxV = v
+        if (v < minV) minV = v
+    }
+    maxV = maxV.coerceAtLeast(minV + 1f)
+    val range = (maxV - minV).coerceAtLeast(1f)
+    val stepX = canvasSize.width / (visible - 1)
+    val gridColor = Color(0xFFD5DDE5)
+    for (frac in listOf(0.25f, 0.5f, 0.75f)) {
+        val y = canvasSize.height * (1f - frac)
+        drawLine(gridColor, Offset(0f, y), Offset(canvasSize.width, y), strokeWidth = 0.5.dp.toPx())
+    }
+    for (i in 1 until visible) {
+        val a = points[start + i - 1]
+        val b = points[start + i]
+        val x1 = stepX * (i - 1)
+        val y1 = canvasSize.height - ((a.value - minV) / range) * canvasSize.height
+        val x2 = stepX * i
+        val y2 = canvasSize.height - ((b.value - minV) / range) * canvasSize.height
+        drawLine(
+            color,
+            Offset(x1, y1),
+            Offset(x2, y2),
+            strokeWidth = strokeDp.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+// ── Configuration screen ───────────────────────────────────────────────────────
+@Composable
+private fun ConfigScreen(
     settings: Map<Int, EditableRegister>,
     onEdit: (Int, Int) -> Unit,
     onWrite: (Int, Int) -> Unit,
 ) {
-    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         item {
-            Text("Holding Register Configuration", color = CardText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text("Edits are written with Modbus function 06. Start polling reads live input block 30051..30063.", color = Muted)
+            Text("Holding Registers", color = TxtMain, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "Modbus function 06 writes. Polling reads input registers 30051–30063.",
+                color = TxtLabel, fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(4.dp))
         }
-        items<EditableRegister>(settings.values.sortedBy { it.register.definition.address }) { editable ->
+        items(settings.values.sortedBy { it.register.definition.address }) { editable ->
             ConfigRow(editable, onEdit, onWrite)
-        }
-    }
-}
-
-@Composable
-private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<PacketLogEntry>) {
-    Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        IndustrialCard {
-            Text("USB Device", color = CardText, fontWeight = FontWeight.Bold)
-            Text("VID/PID: ${usb.deviceInfo.vendorId.hex16()} / ${usb.deviceInfo.productId.hex16()}", color = Muted)
-            Text("Interface: ${usb.deviceInfo.interfaceId}  IN: ${usb.deviceInfo.inEndpoint}  OUT: ${usb.deviceInfo.outEndpoint}", color = Muted)
-            Text("Polling: ${"%.1f".format(snapshot.pollingRateHz)} Hz  Error: ${snapshot.error ?: "none"}", color = Muted)
-            Text("Input CRC: ${snapshot.input?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "--"}", color = Muted)
-            Text("Holding CRC: ${snapshot.holding?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "--"}", color = Muted)
-            Spacer(Modifier.height(8.dp))
-            Text("Detected USB devices", color = CardText, fontWeight = FontWeight.Bold)
-            if (usb.detectedDevices.isEmpty()) {
-                Text("No USB devices listed by Android UsbManager yet.", color = Muted)
-            } else {
-                usb.detectedDevices.forEach { line ->
-                    Text(line, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                }
-            }
-        }
-        IndustrialCard(Modifier.weight(1f)) {
-            Text("Communication Log", color = CardText, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            LazyColumn(Modifier.fillMaxHeight()) {
-                if (logs.isEmpty()) {
-                    item {
-                        Text("No communication yet.", color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                    }
-                } else {
-                    items(
-                        items = logs,
-                        key = { entry: PacketLogEntry -> entry.id },
-                    ) { entry ->
-                        val color = when (entry.direction) {
-                            "TX" -> Color(0xFFB9E7FF)
-                            "RX" -> Color(0xFFD7FFF1)
-                            else -> Color(0xFFE2E8EC)
-                        }
-                        Text(entry.displayText, color = color, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-                    }
-                }
-            }
         }
     }
 }
@@ -503,159 +843,227 @@ private fun ConfigRow(
     onEdit: (Int, Int) -> Unit,
     onWrite: (Int, Int) -> Unit,
 ) {
-    val definition = editable.register.definition
+    val def = editable.register.definition
     var text by remember(editable.editedValue) { mutableStateOf(editable.editedValue.toString()) }
-    IndustrialCard {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    Panel(Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Column(Modifier.weight(1f)) {
-                Text("${definition.address}  ${definition.label}", color = CardText, fontWeight = FontWeight.Bold)
-                Text("Current ${editable.register.raw} ${definition.unit}   ${if (editable.dirty) "modified" else "synced"}", color = Muted)
-                if (definition.max <= 6000 && definition.control != RegisterControl.SWITCH) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        def.address.toString(),
+                        color = TxtMuted,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(def.label, color = TxtMain, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Current: ${editable.register.raw} ${def.unit}",
+                        color = TxtLabel, fontSize = 10.sp,
+                    )
+                    if (editable.dirty) {
+                        Text("● modified", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                if (def.max <= 6000 && def.control != RegisterControl.SWITCH) {
                     Slider(
                         value = editable.editedValue.toFloat(),
-                        onValueChange = { onEdit(definition.address, it.toInt()) },
-                        valueRange = definition.min.toFloat()..definition.max.toFloat(),
+                        onValueChange = { onEdit(def.address, it.toInt()) },
+                        valueRange = def.min.toFloat()..def.max.toFloat(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = BlueA,
+                            activeTrackColor = BlueA,
+                            inactiveTrackColor = TrackClr,
+                        ),
                     )
                 }
             }
-            if (definition.control == RegisterControl.SWITCH) {
-                Switch(checked = editable.editedValue != 0, onCheckedChange = { onEdit(definition.address, if (it) 1 else 0) })
+            if (def.control == RegisterControl.SWITCH) {
+                Switch(
+                    checked = editable.editedValue != 0,
+                    onCheckedChange = { onEdit(def.address, if (it) 1 else 0) },
+                    colors = SwitchDefaults.colors(checkedThumbColor = BlueA, checkedTrackColor = BlueA.copy(alpha = 0.35f)),
+                )
             } else {
                 OutlinedTextField(
                     value = text,
                     onValueChange = {
                         text = it.filter(Char::isDigit)
-                        text.toIntOrNull()?.let { value -> onEdit(definition.address, value) }
+                        text.toIntOrNull()?.let { v -> onEdit(def.address, v) }
                     },
-                    modifier = Modifier.width(110.dp),
+                    modifier = Modifier.width(100.dp),
                     singleLine = true,
-                    label = { Text("Value") },
+                    label = { Text("Value", color = TxtLabel, fontSize = 10.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = BlueA,
+                        unfocusedBorderColor = BorderClr,
+                        focusedTextColor = TxtMain,
+                        unfocusedTextColor = TxtMain,
+                        cursorColor = BlueA,
+                    ),
                 )
             }
             Button(
-                onClick = { onWrite(definition.address, editable.editedValue) },
+                onClick = { onWrite(def.address, editable.editedValue) },
                 enabled = editable.dirty,
-                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = BlueA,
+                    contentColor = Color.White,
+                    disabledContainerColor = TrackClr,
+                    disabledContentColor = TxtMuted,
+                ),
+                shape = RoundedCornerShape(3.dp),
             ) {
-                Text("Write")
+                Text("WRITE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
+// ── Debug screen ───────────────────────────────────────────────────────────────
 @Composable
-private fun EmptyStateCard(usb: UsbHidState, message: String) {
-    IndustrialCard {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Box(
-                Modifier
-                    .size(74.dp)
-                    .background(Color(0xFFEAF4F1), CircleShape)
-                    .border(2.dp, if (usb.connected) Accent else Amber, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(if (usb.connected) "HID" else "USB", color = if (usb.connected) Accent else Amber, fontWeight = FontWeight.Bold)
-            }
-            Column(Modifier.weight(1f)) {
-                Text("Waiting for SG-100 live data", color = CardText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text(message, color = Muted)
-            }
-        }
-    }
-}
-
-@Composable
-private fun Metric(label: String, value: Any, unit: String, modifier: Modifier = Modifier.width(178.dp)) {
-    Card(
-        modifier = modifier.height(82.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(6.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<PacketLogEntry>) {
+    Column(
+        Modifier.fillMaxSize().padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(label, color = Muted, fontSize = 12.sp)
-            Text("$value $unit".trim(), color = CardText, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Panel(Modifier.fillMaxWidth()) {
+            Text("USB Device", color = TxtMain, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(5.dp))
+            MonoRow("VID / PID",   "${usb.deviceInfo.vendorId.hex16()} / ${usb.deviceInfo.productId.hex16()}")
+            MonoRow("Interface",   "${usb.deviceInfo.interfaceId}   IN: ${usb.deviceInfo.inEndpoint}   OUT: ${usb.deviceInfo.outEndpoint}")
+            MonoRow("Poll",        "${"%.1f".format(snapshot.pollingRateHz)} Hz")
+            MonoRow("Input CRC",   snapshot.input?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "—")
+            MonoRow("Holding CRC", snapshot.holding?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "—")
+            MonoRow("Error",       snapshot.error ?: "none")
+            if (usb.detectedDevices.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Detected USB devices", color = TxtMain, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(3.dp))
+                usb.detectedDevices.forEach { line ->
+                    Text(line, color = TxtLabel, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+        Panel(Modifier.fillMaxWidth().weight(1f)) {
+            Text("Communication Log", color = TxtMain, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(5.dp))
+            LazyColumn(Modifier.fillMaxHeight()) {
+                if (logs.isEmpty()) {
+                    item { Text("No communication yet.", color = TxtMuted, fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
+                } else {
+                    items(logs, key = { it.id }) { entry ->
+                        val color = when (entry.direction) {
+                            "TX"  -> Color(0xFF1050A0)
+                            "RX"  -> Color(0xFF0E7050)
+                            else  -> TxtLabel
+                        }
+                        Text(entry.displayText, color = color, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                    }
+                }
+            }
         }
     }
 }
 
+// ── Narrow fallback (phones / portrait) ───────────────────────────────────────
 @Composable
-private fun Led(label: String, active: Boolean) {
-    Row(
-        Modifier
-            .border(1.dp, if (active) Accent else Border, RoundedCornerShape(4.dp))
-            .background(if (active) Color(0xFFE6F6F1) else Color(0xFFF4F6F7), RoundedCornerShape(4.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+private fun NarrowMonitor(
+    snapshot: PollingSnapshot,
+    usb: UsbHidState,
+    rpmEv: EngineeringValue,
+    pwmEv: EngineeringValue,
+    reqEv: EngineeringValue,
+    syncEv: EngineeringValue,
+    currEv: EngineeringValue,
+    posEv: EngineeringValue,
+) {
+    LazyColumn(
+        Modifier.fillMaxSize().padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(Modifier.size(9.dp).background(if (active) Accent else Color(0xFF9AA8AF), CircleShape))
-        Text(label, color = if (active) CardText else Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Panel(Modifier.weight(1f).height(165.dp)) {
+                    ArcGauge("ENGINE SPEED",   rpmEv.displayValue,                       4000.0, rpmEv.text, BlueA,  Modifier.fillMaxSize())
+                }
+                Panel(Modifier.weight(1f).height(165.dp)) {
+                    ArcGauge("PWM / ACTUATOR", pwmEv.displayValue.coerceAtMost(100.0), 100.0, pwmEv.text, AmberA, Modifier.fillMaxSize())
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TelCard("ENGINE SPEED",    rpmEv.text,  BlueA,   Modifier.weight(1f))
+                TelCard("REQUESTED SPEED", reqEv.text,  TxtMain, Modifier.weight(1f))
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TelCard("ACT. CURRENT", currEv.text, if (currEv.outOfRange) RedA else TxtMain, Modifier.weight(1f))
+                TelCard("SYNC VOLTAGE", syncEv.text, TxtMain, Modifier.weight(1f))
+            }
+        }
+        item { ActuatorBar(posEv, Modifier.fillMaxWidth()) }
+        item { StatusPanel(snapshot, usb) }
     }
 }
 
+// ── Shared layout primitives ───────────────────────────────────────────────────
 @Composable
-private fun IndustrialCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier
-            .background(Panel, RoundedCornerShape(6.dp))
-            .border(1.dp, Border, RoundedCornerShape(6.dp))
-            .padding(12.dp),
+            .background(PanelBg, RoundedCornerShape(5.dp))
+            .border(1.dp, BorderClr, RoundedCornerShape(5.dp))
+            .padding(11.dp),
         content = content,
     )
 }
 
 @Composable
-private fun Gauge(label: String, value: Double, max: Double, displayValue: String, color: Color) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val stroke = 14.dp.toPx()
-            val size = min(size.width, size.height * 1.6f) - stroke * 2
-            val topLeft = Offset((this.size.width - size) / 2f, stroke)
-            drawArc(Color(0xFFD4DEE4), 180f, 180f, false, topLeft, Size(size, size), style = Stroke(stroke, cap = StrokeCap.Round))
-            val fraction = (value.coerceIn(0.0, max) / max).toFloat()
-            drawArc(color, 180f, 180f * fraction, false, topLeft, Size(size, size), style = Stroke(stroke, cap = StrokeCap.Round))
-            val center = Offset(topLeft.x + size / 2f, topLeft.y + size / 2f)
-            val angle = Math.toRadians((180 + 180f * fraction).toDouble())
-            val radius = size / 2f - stroke
-            drawLine(CardText, center, Offset(center.x + cos(angle).toFloat() * radius, center.y + sin(angle).toFloat() * radius), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
-            drawCircle(CardText, 8.dp.toPx(), center)
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(displayValue, color = CardText, fontSize = 30.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(label, color = Muted, fontSize = 10.sp, fontWeight = FontWeight.Black)
-        }
+private fun SectionLabel(text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.width(3.dp).height(11.dp).background(BlueA, RoundedCornerShape(1.dp)))
+        Text(text, color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 0.8.sp)
     }
 }
 
 @Composable
-private fun TrendGraph(title: String, points: List<GraphPoint>, color: Color, zoom: Float) {
-    Column {
-        Text(title, color = CardText, fontWeight = FontWeight.Bold)
-        Canvas(Modifier.fillMaxSize().padding(top = 8.dp)) {
-            drawRect(Brush.verticalGradient(listOf(Color(0xFF13211E), Color(0xFF0B1412))))
-            val visibleCount = min(points.size, (240 / zoom).toInt().coerceAtLeast(20))
-            if (visibleCount < 2) return@Canvas
-            val startIndex = points.size - visibleCount
-            var maxValue = points[startIndex].value
-            var minValue = points[startIndex].value
-            for (index in startIndex + 1 until points.size) {
-                val value = points[index].value
-                if (value > maxValue) maxValue = value
-                if (value < minValue) minValue = value
-            }
-            maxValue = maxValue.coerceAtLeast(1f)
-            val range = (maxValue - minValue).coerceAtLeast(1f)
-            val stepX = size.width / (visibleCount - 1)
-            for (index in 1 until visibleCount) {
-                val a = points[startIndex + index - 1]
-                val b = points[startIndex + index]
-                val x1 = stepX * (index - 1)
-                val y1 = size.height - ((a.value - minValue) / range) * size.height
-                val x2 = stepX * index
-                val y2 = size.height - ((b.value - minValue) / range) * size.height
-                drawLine(color, Offset(x1, y1), Offset(x2, y2), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
-            }
-        }
+private fun InfoChip(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .background(CardBg, RoundedCornerShape(3.dp))
+            .border(1.dp, BorderClr, RoundedCornerShape(3.dp))
+            .padding(horizontal = 7.dp, vertical = 5.dp),
+    ) {
+        Text(label, color = TxtMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
+        Text(value, color = TxtLabel, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
     }
+}
+
+@Composable
+private fun MonoRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, color = TxtMuted, fontSize = 10.sp, modifier = Modifier.width(90.dp), textAlign = TextAlign.End)
+        Text(value, color = TxtLabel, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+// ── Formatting helpers ─────────────────────────────────────────────────────────
+private fun formatFirmware(raw: Int?): String {
+    if (raw == null || raw == 0) return "--"
+    return "v${(raw shr 8) and 0xFF}.${(raw and 0xFF).toString().padStart(2, '0')}"
+}
+
+private fun formatControllerType(raw: Int?): String {
+    if (raw == null || raw == 0) return "--"
+    return "0x${raw.toString(16).uppercase().padStart(4, '0')}"
 }

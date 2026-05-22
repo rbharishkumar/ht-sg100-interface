@@ -197,10 +197,10 @@ class MainWindow(QMainWindow):
         self.metric_cards["sync_voltage"].set_value(
             None if packet.sync_voltage is None else f"{packet.sync_voltage:.3f}"
         )
-        self.metric_cards["actuator_current"].set_value(packet.actuator_current)
+        self.metric_cards["actuator_current"].set_value(_actuator_current_text(packet.actuator_current))
         self.metric_cards["actuator_position"].set_value(packet.actuator_position)
         self.metric_cards["firmware"].set_value(_hex_byte(packet.firmware_version))
-        self.metric_cards["controller_type"].set_value(_hex_byte(packet.controller_type))
+        self.metric_cards["controller_type"].set_value(_controller_type_text(packet.controller_type))
 
         for label, active in packet.status.flags.items():
             if label in self.status_leds:
@@ -258,6 +258,18 @@ def _hex_byte(value: int | None) -> str | None:
     if value is None:
         return None
     return f"0x{value & 0xFFFF:04X}"
+
+
+def _actuator_current_text(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value / 100.0:.2f} A"
+
+
+def _controller_type_text(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 STYLE = """
