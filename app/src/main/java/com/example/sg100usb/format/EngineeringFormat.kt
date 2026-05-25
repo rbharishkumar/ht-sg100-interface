@@ -38,14 +38,11 @@ object EngineeringFormats {
             address = Sg100Registers.PWM_REGISTER,
             displayLabel = "PWM / Position",
             unit = "%",
-            scale = 1.0,
-            decimals = 0,
+            scale = 100.0,
+            decimals = 2,
             unitSeparator = "",
             min = 0.0,
-            // No max clamp: if the device sends values > 100 the real number will be
-            // visible, allowing engineers to identify the correct scale factor.
-            // Expected range 0-100 for direct-percent encoding; if consistently >100
-            // the device uses a higher-resolution encoding (e.g. 0-1000 → scale=10).
+            // Keep no max clamp so scaled values above 100% remain visible.
         ),
         Sg100Registers.REQUESTED_SPEED_REGISTER to RegisterEngineeringMetadata(
             address = Sg100Registers.REQUESTED_SPEED_REGISTER,

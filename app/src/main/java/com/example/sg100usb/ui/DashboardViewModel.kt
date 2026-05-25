@@ -40,6 +40,12 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun disconnect() {
+        packetLogger.message("USB", "Disconnect requested")
+        pollingManager.stop()
+        usbHidManager.close()
+    }
+
     fun startPolling() {
         viewModelScope.launch {
             packetLogger.message("USB", "Connect requested before polling")

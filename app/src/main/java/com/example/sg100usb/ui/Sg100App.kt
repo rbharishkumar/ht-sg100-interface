@@ -2,6 +2,14 @@
 
 package com.example.sg100usb.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,15 +22,17 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -38,7 +48,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,8 +58,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -71,48 +84,68 @@ import com.example.sg100usb.protocol.Sg100Registers
 import com.example.sg100usb.protocol.engineSpeedRpm
 import com.example.sg100usb.protocol.hex16
 import com.example.sg100usb.usb.UsbHidState
+import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
 
-// ── Light industrial colour palette ──────────────────────────────────────────
-// Inspired by Siemens SIMATIC HMI, Woodward governor software, and
-// professional embedded-control-system interfaces.
-private val PageBg      = Color(0xFFECEFF2)   // cool neutral page background
-private val PanelBg     = Color(0xFFFFFFFF)   // white panel surfaces
-private val CardBg      = Color(0xFFF4F7FA)   // off-white card interiors
-private val GraphBg     = Color(0xFFEBF0F5)   // light blue-grey graph canvas
-private val BorderClr   = Color(0xFFCDD5DD)   // soft card borders
-private val DividerClr  = Color(0xFFDDE3EB)   // strip separators
-private val NavRailBg   = Color(0xFFE4EAF0)   // nav rail — slightly cooler than page
-private val TrackClr    = Color(0xFFDDE4EA)   // gauge / bar track
-private val BlueA       = Color(0xFF1565C0)   // industrial blue — primary
-private val TealA       = Color(0xFF00796B)   // teal — healthy / secondary
-private val AmberA      = Color(0xFFBF5000)   // dark amber — caution
-private val RedA        = Color(0xFFB71C1C)   // dark red — fault
-private val GreenA      = Color(0xFF2E7D32)   // dark green — online
-private val TxtMain     = Color(0xFF1A2530)   // near-black primary text
-private val TxtLabel    = Color(0xFF5E7282)   // grey-blue label text
-private val TxtMuted    = Color(0xFF98A8B3)   // muted secondary text
-private val NeedleClr   = Color(0xFF37474F)   // dark steel needle
+private val PageBg = Color(0xFF070B10)
+private val HeaderBg = Color(0xFF0B1118)
+private val PanelBg = Color(0xFF101821)
+private val PanelBg2 = Color(0xFF141F2B)
+private val GraphBg = Color(0xFF0A1118)
+private val BorderClr = Color(0xFF223140)
+private val TrackClr = Color(0xFF263343)
+private val BlueA = Color(0xFF20A7FF)
+private val CyanA = Color(0xFF6DEBFF)
+private val GreenA = Color(0xFF31D475)
+private val AmberA = Color(0xFFFFB33D)
+private val RedA = Color(0xFFFF4E59)
+private val TextMain = Color(0xFFF2F7FF)
+private val TextLabel = Color(0xFFA7B7C8)
+private val TextMuted = Color(0xFF66778A)
 
-// ── Root composable ────────────────────────────────────────────────────────────
+private val navItems = listOf(
+    NavItem("Dashboard", NavGlyph.Dashboard),
+    NavItem("Trends", NavGlyph.Trends),
+    NavItem("Configure", NavGlyph.Configure),
+    NavItem("Diagnostics", NavGlyph.Diagnostics),
+)
+
+private data class NavItem(val label: String, val glyph: NavGlyph)
+
+private enum class NavGlyph {
+    Dashboard,
+    Trends,
+    Configure,
+    Diagnostics,
+}
+
+private data class StatusItem(
+    val label: String,
+    val active: Boolean,
+    val activeColor: Color,
+)
+
 @Composable
 fun Sg100App(viewModel: DashboardViewModel) {
     var screen by remember { mutableIntStateOf(0) }
     MaterialTheme(
-        colorScheme = lightColorScheme(
-            background  = PageBg,
-            surface     = PanelBg,
-            primary     = BlueA,
-            secondary   = TealA,
-            tertiary    = AmberA,
-            error       = RedA,
-            onBackground = TxtMain,
-            onSurface    = TxtMain,
+        colorScheme = darkColorScheme(
+            background = PageBg,
+            surface = PanelBg,
+            primary = BlueA,
+            secondary = GreenA,
+            tertiary = AmberA,
+            error = RedA,
+            onBackground = TextMain,
+            onSurface = TextMain,
         )
     ) {
-        Scaffold(containerColor = PageBg) { padding ->
+        Scaffold(
+            containerColor = PageBg,
+            bottomBar = { BottomNav(screen) { screen = it } },
+        ) { padding ->
             Column(
                 Modifier
                     .fillMaxSize()
@@ -120,31 +153,32 @@ fun Sg100App(viewModel: DashboardViewModel) {
                     .background(PageBg)
             ) {
                 AppHeader(viewModel)
-                Row(Modifier.fillMaxSize()) {
-                    NavRail(screen) { screen = it }
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(BorderClr))
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        when (screen) {
-                            0 -> {
-                                val usb     by viewModel.usbState.collectAsState()
-                                val polling by viewModel.polling.collectAsState()
-                                val graph   by viewModel.graph.collectAsState()
-                                MonitorScreen(polling, usb, graph)
-                            }
-                            1 -> {
-                                val graph by viewModel.graph.collectAsState()
-                                TrendsScreen(graph, onZoom = viewModel::setGraphZoom)
-                            }
-                            2 -> {
-                                val settings by viewModel.settings.collectAsState()
-                                ConfigScreen(settings, viewModel::editRegister, viewModel::writeRegister)
-                            }
-                            3 -> {
-                                val usb     by viewModel.usbState.collectAsState()
-                                val polling by viewModel.polling.collectAsState()
-                                val logs    by viewModel.packetLog.collectAsState()
-                                DebugScreen(usb, polling, logs)
-                            }
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(PageBg)
+                ) {
+                    when (screen) {
+                        0 -> {
+                            val usb by viewModel.usbState.collectAsState()
+                            val polling by viewModel.polling.collectAsState()
+                            val graph by viewModel.graph.collectAsState()
+                            MonitorScreen(polling, usb, graph)
+                        }
+                        1 -> {
+                            val graph by viewModel.graph.collectAsState()
+                            TrendsScreen(graph, onZoom = viewModel::setGraphZoom)
+                        }
+                        2 -> {
+                            val settings by viewModel.settings.collectAsState()
+                            ConfigScreen(settings, viewModel::editRegister, viewModel::writeRegister)
+                        }
+                        3 -> {
+                            val usb by viewModel.usbState.collectAsState()
+                            val polling by viewModel.polling.collectAsState()
+                            val logs by viewModel.packetLog.collectAsState()
+                            DebugScreen(usb, polling, logs)
                         }
                     }
                 }
@@ -153,123 +187,229 @@ fun Sg100App(viewModel: DashboardViewModel) {
     }
 }
 
-// ── App header ─────────────────────────────────────────────────────────────────
 @Composable
 private fun AppHeader(viewModel: DashboardViewModel) {
-    val usb     by viewModel.usbState.collectAsState()
+    val usb by viewModel.usbState.collectAsState()
     val polling by viewModel.polling.collectAsState()
-
-    val dotColor = when {
-        usb.connected && polling.controllerOnline -> GreenA
-        usb.connected                             -> AmberA
-        else                                      -> TxtMuted
+    val input = polling.input
+    val connected = usb.connected
+    val controllerOnline = polling.controllerOnline
+    val statusColor = when {
+        connected && controllerOnline -> GreenA
+        connected -> AmberA
+        else -> TextMuted
     }
     val statusText = when {
-        usb.connected && polling.controllerOnline -> "Device Online"
-        usb.connected                             -> "Connecting to Device"
-        else                                      -> "Device Offline"
+        connected && controllerOnline -> "Online"
+        connected -> "USB linked"
+        usb.permissionPending -> "Permission"
+        else -> "Offline"
     }
-    val statusColor = if (usb.connected && polling.controllerOnline) GreenA else TxtMuted
 
-    Column(Modifier.fillMaxWidth().background(PanelBg)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // ── Nameplate ────────────────────────────────────────────
-            Column(Modifier.width(132.dp)) {
-                Text(
-                    "HUEGLI TECH",
-                    color         = Color(0xFF1C3049),
-                    fontSize      = 11.sp,
-                    fontWeight    = FontWeight.Black,
-                    letterSpacing = 1.2.sp,
-                )
-                Text(
-                    "HT-SG100",
-                    color         = TxtMuted,
-                    fontSize      = 9.sp,
-                    fontFamily    = FontFamily.Monospace,
-                    letterSpacing = 0.5.sp,
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Box(Modifier.width(1.dp).height(28.dp).background(DividerClr))
-            Spacer(Modifier.width(14.dp))
-
-            // ── Connection state ─────────────────────────────────────
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                Box(Modifier.size(8.dp).background(dotColor, CircleShape))
-                Text(statusText, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
-            if (polling.pollingRateHz > 0f) {
-                Spacer(Modifier.width(12.dp))
-                Box(Modifier.width(1.dp).height(16.dp).background(DividerClr))
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    "${"%.1f".format(polling.pollingRateHz)} Hz",
-                    color      = TxtMuted,
-                    fontSize   = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
-
-            // ── Flexible gap — pushes controls to the right ──────────
-            Spacer(Modifier.weight(1f))
-
-            // ── Action controls ──────────────────────────────────────
-            Box(Modifier.width(1.dp).height(28.dp).background(DividerClr))
-            Spacer(Modifier.width(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                HdrButton("Connect",       BlueA,             viewModel::connect)
-                HdrButton("Start Polling", TealA,             viewModel::startPolling)
-                HdrButton("Stop Polling",  Color(0xFF4A6070), viewModel::stopPolling)
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(BorderClr))
-    }
-}
-
-// ── Navigation rail ────────────────────────────────────────────────────────────
-private val navItems = listOf("Dashboard", "Trends", "Configure", "Diagnostics")
-
-@Composable
-private fun NavRail(selected: Int, onSelect: (Int) -> Unit) {
     Column(
         Modifier
-            .width(104.dp)
-            .fillMaxHeight()
-            .background(NavRailBg)
+            .fillMaxWidth()
+            .background(HeaderBg)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Spacer(Modifier.height(10.dp))
-        navItems.forEachIndexed { i, label ->
-            val active = selected == i
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .clickable { onSelect(i) }
-                    .background(if (active) BlueA.copy(alpha = 0.09f) else Color.Transparent),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .fillMaxHeight()
-                        .background(if (active) BlueA else Color.Transparent)
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "SG-100 Speed Governor",
+                    color = TextMain,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    label,
-                    color      = if (active) BlueA else TxtLabel,
-                    fontSize   = 12.sp,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                    modifier   = Modifier.padding(start = 12.dp, end = 8.dp),
+                    "HID telemetry controller",
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            ConnectionPill(statusText, statusColor, controllerOnline)
+        }
+        Spacer(Modifier.height(12.dp))
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            HeaderChip("USB", if (connected) "HID active" else "No link", if (connected) GreenA else TextMuted)
+            HeaderChip("FW", formatFirmware(input?.value(30062)), BlueA)
+            HeaderChip("CTRL", formatControllerType(input?.value(30063)), CyanA)
+            HeaderChip("POLL", if (polling.pollingRateHz > 0f) "${formatOne(polling.pollingRateHz)} Hz" else "Idle", AmberA)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            HeaderActionButton(
+                label = if (connected) "Disconnect" else "Connect",
+                tint = if (connected) RedA else BlueA,
+                active = connected,
+                modifier = Modifier.weight(1f),
+                onClick = { if (connected) viewModel.disconnect() else viewModel.connect() },
+            )
+            SplitRunControl(
+                onStart = viewModel::startPolling,
+                onStop = viewModel::stopPolling,
+                modifier = Modifier.weight(1.25f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectionPill(text: String, color: Color, pulsing: Boolean) {
+    val pulse = rememberPulse(pulsing)
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = if (pulsing) 0.18f + pulse * 0.08f else 0.12f))
+            .border(1.dp, color.copy(alpha = 0.45f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(
+            Modifier
+                .size(8.dp + (pulse * 2).dp)
+                .background(color, CircleShape)
+        )
+        Text(text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun HeaderChip(label: String, value: String, tint: Color) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF0E1720))
+            .border(1.dp, BorderClr, RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(label, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun HeaderActionButton(
+    label: String,
+    tint: Color,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val pulse = rememberPulse(active)
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .height(48.dp)
+            .shadow(if (active) (8 + pulse * 4).dp else 2.dp, RoundedCornerShape(16.dp)),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = tint.copy(alpha = if (active) 0.28f else 0.18f),
+            contentColor = TextMain,
+        ),
+        shape = RoundedCornerShape(16.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
+    ) {
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SplitRunControl(
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0E1720))
+            .border(1.dp, BorderClr, RoundedCornerShape(16.dp))
+    ) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClick = onStart)
+                .background(BlueA.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Start", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+        Box(
+            Modifier
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(BorderClr)
+        )
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClick = onStop)
+                .background(RedA.copy(alpha = 0.13f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Stop", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .background(HeaderBg)
+            .border(1.dp, BorderClr)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        navItems.forEachIndexed { index, item ->
+            val active = selected == index
+            val bg by animateColorAsState(
+                targetValue = if (active) BlueA.copy(alpha = 0.16f) else Color.Transparent,
+                animationSpec = tween(220),
+                label = "navBg",
+            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .height(58.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(bg)
+                    .clickable { onSelect(index) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                NavGlyphCanvas(item.glyph, if (active) BlueA else TextMuted)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    item.label,
+                    color = if (active) TextMain else TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = if (active) FontWeight.Black else FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -277,378 +417,514 @@ private fun NavRail(selected: Int, onSelect: (Int) -> Unit) {
 }
 
 @Composable
-private fun HdrButton(label: String, tint: Color, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        modifier = Modifier.height(38.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = tint.copy(alpha = 0.13f),
-            contentColor   = tint,
-        ),
-        shape = RoundedCornerShape(4.dp),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-    ) {
-        Text(label, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, letterSpacing = 0.1.sp)
+private fun NavGlyphCanvas(glyph: NavGlyph, color: Color) {
+    Canvas(Modifier.size(20.dp)) {
+        val stroke = 2.dp.toPx()
+        when (glyph) {
+            NavGlyph.Dashboard -> {
+                drawArc(
+                    color = color,
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = Offset(2.dp.toPx(), 4.dp.toPx()),
+                    size = Size(size.width - 4.dp.toPx(), size.height - 4.dp.toPx()),
+                    style = Stroke(stroke, cap = StrokeCap.Round),
+                )
+                drawLine(color, center, Offset(size.width * 0.78f, size.height * 0.38f), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawCircle(color, 2.dp.toPx(), center)
+            }
+            NavGlyph.Trends -> {
+                val y0 = size.height * 0.72f
+                drawLine(color.copy(alpha = 0.35f), Offset(0f, y0), Offset(size.width, y0), strokeWidth = 1.dp.toPx())
+                drawLine(color, Offset(1.dp.toPx(), size.height * 0.68f), Offset(size.width * 0.35f, size.height * 0.42f), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, Offset(size.width * 0.35f, size.height * 0.42f), Offset(size.width * 0.66f, size.height * 0.55f), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, Offset(size.width * 0.66f, size.height * 0.55f), Offset(size.width - 1.dp.toPx(), size.height * 0.24f), strokeWidth = stroke, cap = StrokeCap.Round)
+            }
+            NavGlyph.Configure -> {
+                drawCircle(color, 6.dp.toPx(), center, style = Stroke(stroke))
+                drawLine(color, Offset(center.x, 0f), Offset(center.x, 4.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, Offset(center.x, size.height - 4.dp.toPx()), Offset(center.x, size.height), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, Offset(0f, center.y), Offset(4.dp.toPx(), center.y), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, Offset(size.width - 4.dp.toPx(), center.y), Offset(size.width, center.y), strokeWidth = stroke, cap = StrokeCap.Round)
+            }
+            NavGlyph.Diagnostics -> {
+                drawCircle(color, 8.dp.toPx(), center, style = Stroke(stroke))
+                drawLine(color, Offset(center.x, 5.dp.toPx()), Offset(center.x, center.y), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawCircle(color, 1.5.dp.toPx(), Offset(center.x, size.height * 0.72f))
+            }
+        }
     }
 }
 
-// ── Monitor screen — three-column command bridge ───────────────────────────────
 @Composable
 private fun MonitorScreen(snapshot: PollingSnapshot, usb: UsbHidState, graph: GraphSeries) {
-    val input  = snapshot.input
-    val rpm    = input?.engineSpeedRpm ?: 0
-    val rpmEv  = EngineeringFormats.rpm(rpm)
-    val pwmEv  = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
-    val reqEv  = EngineeringFormats.register(input, Sg100Registers.REQUESTED_SPEED_REGISTER)
+    val input = snapshot.input
+    val rpmEv = EngineeringFormats.rpm(input?.engineSpeedRpm ?: 0)
+    val pwmEv = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
+    val reqEv = EngineeringFormats.register(input, Sg100Registers.REQUESTED_SPEED_REGISTER)
     val syncEv = EngineeringFormats.register(input, Sg100Registers.SYNC_VOLTAGE_REGISTER)
     val currEv = EngineeringFormats.register(input, 30057)
-    val posEv  = EngineeringFormats.register(input, 30058)
+    val posEv = EngineeringFormats.register(input, 30058)
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(PageBg)) {
-        if (maxWidth >= 680.dp) {
-            Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                // ── Left: gauges ──────────────────────────────────────────────
-                Column(
-                    Modifier
-                        .weight(0.26f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SectionLabel("INSTRUMENTS")
-                    Panel(Modifier.weight(1.05f).fillMaxWidth()) {
-                        ArcGauge(
-                            label     = "ENGINE SPEED",
-                            value     = rpmEv.displayValue,
-                            max       = 4000.0,
-                            text      = rpmEv.text,
-                            fillColor = BlueA,
-                            modifier  = Modifier.fillMaxSize(),
-                        )
-                    }
-                    Panel(Modifier.weight(0.95f).fillMaxWidth()) {
-                        ArcGauge(
-                            label     = "PWM / ACTUATOR",
-                            value     = pwmEv.displayValue.coerceAtMost(100.0),
-                            max       = 100.0,
-                            text      = pwmEv.text,
-                            fillColor = AmberA,
-                            modifier  = Modifier.fillMaxSize(),
-                        )
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        InfoChip("FW", formatFirmware(input?.value(30062)), Modifier.weight(1f))
-                        InfoChip("Controller", formatControllerType(input?.value(30063)), Modifier.weight(1f))
-                    }
-                }
-
-                // ── Centre: telemetry + actuator + status ─────────────────────
-                Column(
-                    Modifier
-                        .weight(0.44f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SectionLabel("LIVE TELEMETRY")
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TelCard("ENGINE SPEED",    rpmEv.text,  BlueA,  Modifier.weight(1f))
-                        TelCard("REQUESTED SPEED", reqEv.text,  TxtMain, Modifier.weight(1f))
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TelCard(
-                            label     = "ACTUATOR CURRENT",
-                            value     = currEv.text,
-                            valueColor = if (currEv.outOfRange) RedA else TxtMain,
-                            modifier  = Modifier.weight(1f),
-                        )
-                        TelCard("SYNC VOLTAGE", syncEv.text, TxtMain, Modifier.weight(1f))
-                    }
-                    ActuatorBar(posEv, Modifier.fillMaxWidth())
-                    Spacer(Modifier.weight(1f))
-                    StatusPanel(snapshot, usb)
-                }
-
-                // ── Right: inline trend rails ─────────────────────────────────
-                Column(
-                    Modifier
-                        .weight(0.30f)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SectionLabel("REAL-TIME TRENDS")
-                    MiniTrend("ENGINE RPM",      graph.rpm,           BlueA,  graph.zoom, Modifier.weight(1f).fillMaxWidth())
-                    MiniTrend("PWM / ACTUATOR",  graph.pwm,           AmberA, graph.zoom, Modifier.weight(1f).fillMaxWidth())
-                    MiniTrend("ACT. CURRENT",    graph.actuatorCurrent, RedA,  graph.zoom, Modifier.weight(1f).fillMaxWidth())
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        val hz = snapshot.pollingRateHz
-                        Text(
-                            if (hz > 0f) "${"%.1f".format(hz)} Hz" else "—",
-                            color = TxtMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace,
-                        )
-                        val ok = snapshot.input?.crc?.ok == true
-                        Text(
-                            "CRC ${if (ok) "OK" else "ERR"}",
-                            color = if (ok) GreenA else RedA,
-                            fontSize = 10.sp, fontFamily = FontFamily.Monospace,
-                        )
-                    }
-                }
-            }
-        } else {
-            NarrowMonitor(snapshot, usb, rpmEv, pwmEv, reqEv, syncEv, currEv, posEv)
-        }
-    }
-}
-
-// ── Arc gauge ──────────────────────────────────────────────────────────────────
-@Composable
-private fun ArcGauge(
-    label: String,
-    value: Double,
-    max: Double,
-    text: String,
-    fillColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val strokePx  = 11.dp.toPx()
-            val diam      = min(size.width, size.height * 1.65f) - strokePx * 2f
-            val topLeft   = Offset((size.width - diam) / 2f, strokePx)
-            val arcSz     = Size(diam, diam)
-
-            // Track
-            drawArc(TrackClr, 180f, 180f, false, topLeft, arcSz, style = Stroke(strokePx, cap = StrokeCap.Round))
-
-            // Value arc — transitions through caution and alarm ranges
-            val frac = (value.coerceIn(0.0, max) / max).toFloat()
-            val color = when {
-                frac < 0.70f -> fillColor
-                frac < 0.90f -> AmberA
-                else          -> RedA
-            }
-            if (frac > 0f) {
-                drawArc(color, 180f, 180f * frac, false, topLeft, arcSz, style = Stroke(strokePx, cap = StrokeCap.Round))
-            }
-
-            // Needle — dark steel appearance
-            val cx    = topLeft.x + diam / 2f
-            val cy    = topLeft.y + diam / 2f
-            val angle = Math.toRadians(180.0 + 180.0 * frac)
-            val r     = diam / 2f - strokePx
-            drawLine(
-                NeedleClr,
-                Offset(cx, cy),
-                Offset(cx + cos(angle).toFloat() * r, cy + sin(angle).toFloat() * r),
-                strokeWidth = 2.5.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-            drawCircle(TrackClr,   5.dp.toPx(), Offset(cx, cy))
-            drawCircle(NeedleClr,  3.dp.toPx(), Offset(cx, cy))
-        }
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(bottom = 6.dp),
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 720.dp
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(
-                text,
-                color = TxtMain,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(label, color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+            item {
+                DashboardTopStrip(snapshot, usb)
+            }
+            item {
+                if (wide) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        HeroRpmCard(rpmEv, reqEv, Modifier.weight(1.1f).height(280.dp))
+                        Column(Modifier.weight(0.9f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            PwmGaugeCard(pwmEv, Modifier.fillMaxWidth().height(133.dp))
+                            PositionCard(posEv, Modifier.fillMaxWidth().height(133.dp))
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        HeroRpmCard(rpmEv, reqEv, Modifier.fillMaxWidth().heightIn(min = 300.dp))
+                        PwmGaugeCard(pwmEv, Modifier.fillMaxWidth().height(160.dp))
+                        PositionCard(posEv, Modifier.fillMaxWidth().height(136.dp))
+                    }
+                }
+            }
+            item {
+                ResponsiveTelemetryGrid(reqEv, pwmEv, syncEv, currEv, posEv, wide)
+            }
+            item {
+                StatusSection(statusItems(snapshot, usb))
+            }
+            item {
+                DashboardTrends(graph)
+            }
         }
     }
 }
 
-// ── Telemetry card ─────────────────────────────────────────────────────────────
 @Composable
-private fun TelCard(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
-    Panel(modifier) {
-        Text(
-            label,
-            color = TxtLabel,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.4.sp,
-        )
-        Spacer(Modifier.height(3.dp))
+private fun DashboardTopStrip(snapshot: PollingSnapshot, usb: UsbHidState) {
+    FlowRow(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HealthChip("Connection", if (usb.connected) "Connected" else "Disconnected", usb.connected, GreenA)
+        HealthChip("Controller", if (snapshot.controllerOnline) "Running" else "No data", snapshot.controllerOnline, GreenA)
+        HealthChip("Input CRC", snapshot.input?.crc?.let { if (it.ok) "Pass" else "Fail" } ?: "Pending", snapshot.input?.crc?.ok == true, GreenA)
+        HealthChip("Last Error", snapshot.error ?: "None", snapshot.error != null, AmberA)
+    }
+}
+
+@Composable
+private fun HealthChip(label: String, value: String, active: Boolean, activeColor: Color) {
+    val tint = if (active) activeColor else TextMuted
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (active) tint.copy(alpha = 0.14f) else Color(0xFF0D151D))
+            .border(1.dp, if (active) tint.copy(alpha = 0.35f) else BorderClr, RoundedCornerShape(14.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        StatusGlyph(active, tint)
+        Column {
+            Text(label, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            Text(value, color = tint, fontSize = 12.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun HeroRpmCard(rpm: EngineeringValue, requested: EngineeringValue, modifier: Modifier = Modifier) {
+    TelemetryPanel(
+        modifier,
+        accent = BlueA,
+        brush = Brush.verticalGradient(listOf(Color(0xFF122D42), PanelBg)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column {
+                Text("ENGINE SPEED", color = TextLabel, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                Text("Live governor telemetry", color = TextMuted, fontSize = 11.sp)
+            }
+            LiveBadge("LIVE", BlueA)
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            CircularGauge(
+                value = rpm.displayValue,
+                max = 4000.0,
+                tint = BlueA,
+                modifier = Modifier.fillMaxSize(),
+                stroke = 18f,
+                sweep = 250f,
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    splitValue(rpm.text).first,
+                    color = TextMain,
+                    fontSize = 56.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text("RPM", color = BlueA, fontSize = 13.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ValuePair("Requested", requested.text, BlueA)
+            ValuePair("Range", "0-4000 RPM", TextMuted)
+        }
+    }
+}
+
+@Composable
+private fun PwmGaugeCard(ev: EngineeringValue, modifier: Modifier = Modifier) {
+    TelemetryPanel(modifier, accent = AmberA) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("PWM / ACTUATOR OUTPUT", color = TextLabel, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text(ev.text, color = TextMain, fontSize = 30.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+            }
+            Box(Modifier.size(92.dp), contentAlignment = Alignment.Center) {
+                CircularGauge(
+                    value = ev.displayValue.coerceAtMost(100.0),
+                    max = 100.0,
+                    tint = AmberA,
+                    modifier = Modifier.fillMaxSize(),
+                    stroke = 13f,
+                    sweep = 270f,
+                )
+                Text(ev.text, color = AmberA, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PositionCard(ev: EngineeringValue, modifier: Modifier = Modifier) {
+    val progress = (ev.displayValue / 100.0).coerceIn(0.0, 1.0).toFloat()
+    TelemetryPanel(modifier, accent = GreenA) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("ACTUATOR POSITION", color = TextLabel, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text(ev.text, color = TextMain, fontSize = 28.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+            }
+            if (ev.outOfRange || ev.raw > 100) {
+                Text("RAW ${ev.raw}", color = AmberA, fontSize = 11.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LinearTelemetryBar(progress, GreenA)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("0", "25", "50", "75", "100%").forEach {
+                Text(it, color = TextMuted, fontSize = 10.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResponsiveTelemetryGrid(
+    requested: EngineeringValue,
+    pwm: EngineeringValue,
+    sync: EngineeringValue,
+    current: EngineeringValue,
+    position: EngineeringValue,
+    wide: Boolean,
+) {
+    val cards = listOf(
+        Triple("Requested Speed", requested.text, BlueA),
+        Triple("PWM / Actuator Output", pwm.text, AmberA),
+        Triple("Sync Voltage", sync.text, CyanA),
+        Triple("Actuator Current", current.text, if (current.outOfRange) RedA else GreenA),
+        Triple("Actuator Position", position.text, GreenA),
+    )
+    if (wide) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            cards.forEach { card ->
+                CompactTelemetryCard(card.first, card.second, card.third, Modifier.weight(1f).height(112.dp))
+            }
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            cards.chunked(2).forEach { rowCards ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    rowCards.forEach { card ->
+                        CompactTelemetryCard(card.first, card.second, card.third, Modifier.weight(1f).height(116.dp))
+                    }
+                    if (rowCards.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactTelemetryCard(label: String, value: String, tint: Color, modifier: Modifier = Modifier) {
+    TelemetryPanel(modifier, accent = tint) {
+        Text(label.uppercase(Locale.US), color = TextLabel, fontSize = 10.sp, fontWeight = FontWeight.Black, maxLines = 2)
+        Spacer(Modifier.weight(1f))
         Text(
             value,
-            color = valueColor,
-            fontSize = 20.sp,
+            color = tint,
+            fontSize = 24.sp,
             fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-// ── Actuator position bar ──────────────────────────────────────────────────────
 @Composable
-private fun ActuatorBar(ev: EngineeringValue, modifier: Modifier = Modifier) {
-    val raw      = ev.raw
-    val display  = ev.displayValue
-    // For display purposes clamp to 0-100 visually; show raw number in text
-    val barFrac  = (display / 100.0).coerceIn(0.0, 1.0).toFloat()
-    val barColor = when {
-        barFrac < 0.80f -> TealA
-        barFrac < 0.95f -> AmberA
-        else             -> RedA
-    }
-    Panel(modifier) {
-        Row(
+private fun StatusSection(items: List<StatusItem>) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionHeading("Device Status", "Live I/O and governor state")
+        Spacer(Modifier.height(10.dp))
+        FlowRow(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("ACTUATOR POSITION", color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(ev.text, color = TxtMain, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                if (ev.outOfRange || raw > 100) {
-                    Text("raw $raw", color = AmberA, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                }
+            items.forEach { item ->
+                StatusChip(item)
             }
         }
-        Spacer(Modifier.height(7.dp))
+    }
+}
+
+@Composable
+private fun StatusChip(item: StatusItem) {
+    val bg by animateColorAsState(
+        targetValue = if (item.active) item.activeColor.copy(alpha = 0.16f) else Color(0xFF0F171F),
+        animationSpec = tween(260),
+        label = "statusBg",
+    )
+    val border by animateColorAsState(
+        targetValue = if (item.active) item.activeColor.copy(alpha = 0.42f) else BorderClr,
+        animationSpec = tween(260),
+        label = "statusBorder",
+    )
+    Row(
+        Modifier
+            .widthIn(min = 150.dp)
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        StatusGlyph(item.active, if (item.active) item.activeColor else TextMuted)
+        Column {
+            Text(item.label, color = TextMain, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(if (item.active) "Active" else "Inactive", color = if (item.active) item.activeColor else TextMuted, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun DashboardTrends(graph: GraphSeries) {
+    Column(Modifier.fillMaxWidth()) {
+        SectionHeading("Telemetry Trends", "Recent live samples")
+        Spacer(Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            MiniTrend("Engine RPM", graph.rpm, BlueA, graph.zoom, Modifier.fillMaxWidth().height(96.dp))
+            MiniTrend("PWM / Actuator", graph.pwm, AmberA, graph.zoom, Modifier.fillMaxWidth().height(96.dp))
+            MiniTrend("Actuator Current", graph.actuatorCurrent, RedA, graph.zoom, Modifier.fillMaxWidth().height(96.dp))
+        }
+    }
+}
+
+@Composable
+private fun CircularGauge(
+    value: Double,
+    max: Double,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    stroke: Float = 14f,
+    sweep: Float = 250f,
+) {
+    val target = (value / max).coerceIn(0.0, 1.0).toFloat()
+    val animated by animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "gauge",
+    )
+    Canvas(modifier) {
+        val strokePx = stroke.dp.toPx()
+        val diameter = min(size.width, size.height) - strokePx * 2f
+        val left = (size.width - diameter) / 2f
+        val top = (size.height - diameter) / 2f
+        val arcSize = Size(diameter, diameter)
+        val start = 90f + (360f - sweep) / 2f
+        drawArc(
+            TrackClr,
+            start,
+            sweep,
+            false,
+            Offset(left, top),
+            arcSize,
+            style = Stroke(strokePx, cap = StrokeCap.Round),
+        )
+        val gaugeColor = when {
+            animated < 0.72f -> tint
+            animated < 0.9f -> AmberA
+            else -> RedA
+        }
+        if (animated > 0f) {
+            drawArc(
+                gaugeColor,
+                start,
+                sweep * animated,
+                false,
+                Offset(left, top),
+                arcSize,
+                style = Stroke(strokePx, cap = StrokeCap.Round),
+            )
+        }
+        val angle = Math.toRadians((start + sweep * animated).toDouble())
+        val radius = diameter / 2f
+        val center = Offset(left + radius, top + radius)
+        val dot = Offset(
+            center.x + cos(angle).toFloat() * radius,
+            center.y + sin(angle).toFloat() * radius,
+        )
+        drawCircle(gaugeColor.copy(alpha = 0.2f), strokePx * 0.75f, dot)
+        drawCircle(gaugeColor, strokePx * 0.38f, dot)
+    }
+}
+
+@Composable
+private fun LinearTelemetryBar(progress: Float, tint: Color) {
+    val animated by animateFloatAsState(
+        targetValue = progress.coerceIn(0f, 1f),
+        animationSpec = tween(520, easing = FastOutSlowInEasing),
+        label = "bar",
+    )
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(16.dp)
+            .clip(RoundedCornerShape(50))
+            .background(TrackClr)
+    ) {
         Box(
             Modifier
-                .fillMaxWidth()
-                .height(14.dp)
-                .background(TrackClr, RoundedCornerShape(3.dp))
-        ) {
-            if (barFrac > 0f) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(barFrac)
-                        .fillMaxHeight()
-                        .background(barColor, RoundedCornerShape(3.dp))
+                .fillMaxWidth(animated)
+                .fillMaxHeight()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(tint.copy(alpha = 0.72f), tint, CyanA.copy(alpha = 0.8f))
+                    )
                 )
-            }
-        }
-        Spacer(Modifier.height(3.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("0", "25", "50", "75", "100%").forEach {
-                Text(it, color = TxtMuted, fontSize = 8.sp)
-            }
-        }
-    }
-}
-
-// ── Status LED panel ───────────────────────────────────────────────────────────
-// Maps protocol bit-label strings → operator-readable display labels (UI layer only).
-private val inputBitDisplayLabels = mapOf(
-    "Speed2 input"        to "Speed 2 Input",
-    "Speed3 input"        to "Speed 3 Input",
-    "Gain input"          to "Gain Input",
-    "Fn key"              to "Function Key",
-    "Plus key"            to "Plus Key",
-    "Minus key"           to "Minus Key",
-    "Idle input"          to "Idle Input",
-    "Pickup sensor input" to "Pickup Sensor Input",
-)
-
-@Composable
-private fun StatusPanel(snapshot: PollingSnapshot, usb: UsbHidState) {
-    val input = snapshot.input
-    Panel(Modifier.fillMaxWidth()) {
-        Text(
-            "DEVICE STATUS",
-            color         = TxtLabel,
-            fontSize      = 9.sp,
-            fontWeight    = FontWeight.SemiBold,
-            letterSpacing = 0.4.sp,
-        )
-        Spacer(Modifier.height(10.dp))
-
-        // ── Three-column status groups ─────────────────────────────
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            StatusGroup("CONNECTION", Modifier.weight(1f)) {
-                SLed("USB Connection", usb.connected,             GreenA)
-                SLed("Controller",     snapshot.controllerOnline, GreenA)
-            }
-            Box(Modifier.width(1.dp).fillMaxHeight().background(DividerClr))
-            StatusGroup("FAULT CONDITIONS", Modifier.weight(1f)) {
-                SLed("Overspeed",    input?.statusBits?.get("Overspeed occurred")   == true, RedA)
-                SLed("Over Current", input?.statusBits?.get("Actuator overcurrent") == true, RedA)
-            }
-            Box(Modifier.width(1.dp).fillMaxHeight().background(DividerClr))
-            StatusGroup("GOVERNOR MODE", Modifier.weight(1f)) {
-                SLed("Droop",  input?.statusBits?.get("Droop input status")    == true, AmberA)
-                SLed("Gain 2", input?.statusBits?.get("Gain2 selection input") == true, AmberA)
-            }
-        }
-
-        // ── Digital inputs ─────────────────────────────────────────
-        Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(DividerClr))
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "DIGITAL INPUTS",
-            color         = TxtMuted,
-            fontSize      = 8.sp,
-            fontWeight    = FontWeight.SemiBold,
-            letterSpacing = 0.5.sp,
-        )
-        Spacer(Modifier.height(6.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalArrangement   = Arrangement.spacedBy(8.dp),
-        ) {
-            Sg100Registers.input30056Bits.values.forEach { protocolLabel ->
-                val displayLabel = inputBitDisplayLabels[protocolLabel] ?: protocolLabel
-                SLed(displayLabel, input?.inputBits?.get(protocolLabel) == true, TealA)
-            }
-        }
-
-        if (snapshot.error != null) {
-            Spacer(Modifier.height(6.dp))
-            Text("⚠ ${snapshot.error}", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-        }
-    }
-}
-
-@Composable
-private fun StatusGroup(
-    title: String,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Column(modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-        Text(
-            title,
-            color         = TxtMuted,
-            fontSize      = 8.sp,
-            fontWeight    = FontWeight.SemiBold,
-            letterSpacing = 0.5.sp,
-        )
-        Spacer(Modifier.height(6.dp))
-        Column(
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-            content = content,
         )
     }
 }
 
 @Composable
-private fun SLed(label: String, active: Boolean, activeColor: Color) {
+private fun StatusGlyph(active: Boolean, color: Color) {
+    val pulse = rememberPulse(active)
+    Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .size(18.dp)
+                .background(color.copy(alpha = if (active) 0.13f + pulse * 0.14f else 0.09f), CircleShape)
+        )
+        Box(
+            Modifier
+                .size(if (active) 8.dp + (pulse * 2).dp else 7.dp)
+                .background(color, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun LiveBadge(label: String, tint: Color) {
+    val pulse = rememberPulse(true)
     Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.14f + pulse * 0.08f))
+            .border(1.dp, tint.copy(alpha = 0.4f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(Modifier.size(8.dp).background(if (active) activeColor else Color(0xFFCDD5DD), CircleShape))
-        Text(
-            label,
-            color      = if (active) activeColor else TxtLabel,
-            fontSize   = 10.sp,
-            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-        )
+        Box(Modifier.size(7.dp + (pulse * 2).dp).background(tint, CircleShape))
+        Text(label, color = tint, fontSize = 10.sp, fontWeight = FontWeight.Black)
     }
 }
 
-// ── Mini trend graph ───────────────────────────────────────────────────────────
+@Composable
+private fun ValuePair(label: String, value: String, tint: Color) {
+    Column {
+        Text(label, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        Text(value, color = tint, fontSize = 14.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun TelemetryPanel(
+    modifier: Modifier = Modifier,
+    accent: Color = BlueA,
+    brush: Brush = Brush.verticalGradient(listOf(PanelBg2, PanelBg)),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .shadow(10.dp, RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(22.dp))
+            .background(brush)
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(22.dp))
+            .padding(16.dp),
+        content = content,
+    )
+}
+
+@Composable
+private fun SectionHeading(title: String, subtitle: String) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier
+                .width(4.dp)
+                .height(28.dp)
+                .clip(RoundedCornerShape(50))
+                .background(BlueA)
+        )
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextMain, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text(subtitle, color = TextMuted, fontSize = 11.sp)
+        }
+    }
+}
+
 @Composable
 private fun MiniTrend(
     title: String,
@@ -657,76 +933,65 @@ private fun MiniTrend(
     zoom: Float,
     modifier: Modifier = Modifier,
 ) {
-    val latest = points.lastOrNull()?.value
-    Panel(modifier) {
+    TelemetryPanel(modifier, accent = color) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
-            if (latest != null) {
-                Text(
-                    "%.1f".format(latest),
-                    color = color,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                )
+            Text(title.uppercase(Locale.US), color = TextLabel, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            points.lastOrNull()?.let {
+                Text(formatTwo(it.value), color = color, fontSize = 12.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(8.dp))
         Canvas(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(GraphBg, RoundedCornerShape(3.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(GraphBg)
         ) {
-            drawTrendLine(points, zoom, color, size, strokeDp = 1.5f)
+            drawTrendLine(points, zoom, color, size, strokeDp = 2f)
         }
     }
 }
 
-// ── Trends tab (full width) ────────────────────────────────────────────────────
 @Composable
 private fun TrendsScreen(graph: GraphSeries, onZoom: (Float) -> Unit) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Panel(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text("ZOOM", color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
-                Text(
-                    "${"%.1f".format(graph.zoom)}×",
-                    color = BlueA,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.width(36.dp),
-                )
-                Slider(
-                    value = graph.zoom,
-                    onValueChange = onZoom,
-                    valueRange = 1f..6f,
-                    modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = BlueA,
-                        activeTrackColor = BlueA,
-                        inactiveTrackColor = TrackClr,
-                    ),
-                )
+        item {
+            TelemetryPanel(Modifier.fillMaxWidth(), accent = BlueA) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column {
+                        Text("TREND ZOOM", color = TextLabel, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        Text("${formatOne(graph.zoom)}x", color = BlueA, fontSize = 22.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    }
+                    Slider(
+                        value = graph.zoom,
+                        onValueChange = onZoom,
+                        valueRange = 1f..6f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = BlueA,
+                            activeTrackColor = BlueA,
+                            inactiveTrackColor = TrackClr,
+                        ),
+                    )
+                }
             }
         }
-        FullTrend("ENGINE RPM",     graph.rpm,             BlueA,  graph.zoom, Modifier.weight(1f).fillMaxWidth())
-        FullTrend("PWM / ACTUATOR", graph.pwm,             AmberA, graph.zoom, Modifier.weight(1f).fillMaxWidth())
-        FullTrend("ACT. CURRENT",   graph.actuatorCurrent, RedA,   graph.zoom, Modifier.weight(1f).fillMaxWidth())
+        item { FullTrend("Engine RPM", graph.rpm, BlueA, graph.zoom, Modifier.fillMaxWidth().height(230.dp)) }
+        item { FullTrend("PWM / Actuator", graph.pwm, AmberA, graph.zoom, Modifier.fillMaxWidth().height(230.dp)) }
+        item { FullTrend("Actuator Current", graph.actuatorCurrent, RedA, graph.zoom, Modifier.fillMaxWidth().height(230.dp)) }
     }
 }
 
@@ -738,37 +1003,33 @@ private fun FullTrend(
     zoom: Float,
     modifier: Modifier = Modifier,
 ) {
-    val latest = points.lastOrNull()?.value
-    Panel(modifier) {
+    TelemetryPanel(modifier, accent = color) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, color = TxtMain, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            if (latest != null) {
-                Text(
-                    "%.2f".format(latest),
-                    color = color,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                )
+            Column {
+                Text(title, color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Text("Live graph stream", color = TextMuted, fontSize = 11.sp)
+            }
+            points.lastOrNull()?.let {
+                Text(formatTwo(it.value), color = color, fontSize = 18.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
             }
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(12.dp))
         Canvas(
             Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(GraphBg, RoundedCornerShape(4.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(GraphBg)
         ) {
-            drawTrendLine(points, zoom, color, size, strokeDp = 2f)
+            drawTrendLine(points, zoom, color, size, strokeDp = 2.5f)
         }
     }
 }
 
-// Shared Canvas drawing logic extracted to avoid duplication
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendLine(
     points: List<GraphPoint>,
     zoom: Float,
@@ -778,7 +1039,17 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendLine(
 ) {
     if (canvasSize.height < 2f) return
     val visible = min(points.size, (240 / zoom).toInt().coerceAtLeast(10))
-    if (visible < 2) return
+    if (visible < 2) {
+        val centerY = canvasSize.height * 0.5f
+        drawLine(
+            BorderClr,
+            Offset(0f, centerY),
+            Offset(canvasSize.width, centerY),
+            strokeWidth = 1.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
+        return
+    }
     val start = points.size - visible
     var maxV = points[start].value
     var minV = points[start].value
@@ -790,10 +1061,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendLine(
     maxV = maxV.coerceAtLeast(minV + 1f)
     val range = (maxV - minV).coerceAtLeast(1f)
     val stepX = canvasSize.width / (visible - 1)
-    val gridColor = Color(0xFFD5DDE5)
     for (frac in listOf(0.25f, 0.5f, 0.75f)) {
         val y = canvasSize.height * (1f - frac)
-        drawLine(gridColor, Offset(0f, y), Offset(canvasSize.width, y), strokeWidth = 0.5.dp.toPx())
+        drawLine(BorderClr.copy(alpha = 0.5f), Offset(0f, y), Offset(canvasSize.width, y), strokeWidth = 0.7.dp.toPx())
     }
     for (i in 1 until visible) {
         val a = points[start + i - 1]
@@ -812,7 +1082,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendLine(
     }
 }
 
-// ── Configuration screen ───────────────────────────────────────────────────────
 @Composable
 private fun ConfigScreen(
     settings: Map<Int, EditableRegister>,
@@ -820,16 +1089,12 @@ private fun ConfigScreen(
     onWrite: (Int, Int) -> Unit,
 ) {
     LazyColumn(
-        Modifier.fillMaxSize().padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text("Holding Registers", color = TxtMain, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            Text(
-                "Modbus function 06 writes. Polling reads input registers 30051–30063.",
-                color = TxtLabel, fontSize = 11.sp,
-            )
-            Spacer(Modifier.height(4.dp))
+            SectionHeading("Configure", "Holding registers and write controls")
         }
         items(settings.values.sortedBy { it.register.definition.address }) { editable ->
             ConfigRow(editable, onEdit, onWrite)
@@ -845,49 +1110,57 @@ private fun ConfigRow(
 ) {
     val def = editable.register.definition
     var text by remember(editable.editedValue) { mutableStateOf(editable.editedValue.toString()) }
-    Panel(Modifier.fillMaxWidth()) {
+    TelemetryPanel(Modifier.fillMaxWidth(), accent = if (editable.dirty) AmberA else BlueA) {
         Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(def.label, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("${def.address}  Current ${editable.register.raw} ${def.unit}".trim(), color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+            if (editable.dirty) {
+                Text("MODIFIED", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        if (def.max <= 6000 && def.control != RegisterControl.SWITCH) {
+            Slider(
+                value = editable.editedValue.toFloat(),
+                onValueChange = { onEdit(def.address, it.toInt()) },
+                valueRange = def.min.toFloat()..def.max.toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = BlueA,
+                    activeTrackColor = BlueA,
+                    inactiveTrackColor = TrackClr,
+                ),
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        Row(
+            Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        def.address.toString(),
-                        color = TxtMuted,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(def.label, color = TxtMain, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Current: ${editable.register.raw} ${def.unit}",
-                        color = TxtLabel, fontSize = 10.sp,
-                    )
-                    if (editable.dirty) {
-                        Text("● modified", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-                if (def.max <= 6000 && def.control != RegisterControl.SWITCH) {
-                    Slider(
-                        value = editable.editedValue.toFloat(),
-                        onValueChange = { onEdit(def.address, it.toInt()) },
-                        valueRange = def.min.toFloat()..def.max.toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = BlueA,
-                            activeTrackColor = BlueA,
-                            inactiveTrackColor = TrackClr,
+            if (def.control == RegisterControl.SWITCH) {
+                Row(
+                    Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Switch(
+                        checked = editable.editedValue != 0,
+                        onCheckedChange = { onEdit(def.address, if (it) 1 else 0) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = TextMain,
+                            checkedTrackColor = BlueA,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = TrackClr,
                         ),
                     )
+                    Text(if (editable.editedValue != 0) "Enabled" else "Disabled", color = TextLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
-            }
-            if (def.control == RegisterControl.SWITCH) {
-                Switch(
-                    checked = editable.editedValue != 0,
-                    onCheckedChange = { onEdit(def.address, if (it) 1 else 0) },
-                    colors = SwitchDefaults.colors(checkedThumbColor = BlueA, checkedTrackColor = BlueA.copy(alpha = 0.35f)),
-                )
             } else {
                 OutlinedTextField(
                     value = text,
@@ -895,74 +1168,87 @@ private fun ConfigRow(
                         text = it.filter(Char::isDigit)
                         text.toIntOrNull()?.let { v -> onEdit(def.address, v) }
                     },
-                    modifier = Modifier.width(100.dp),
+                    modifier = Modifier.weight(1f),
                     singleLine = true,
-                    label = { Text("Value", color = TxtLabel, fontSize = 10.sp) },
+                    label = { Text("Value", color = TextMuted) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = BlueA,
                         unfocusedBorderColor = BorderClr,
-                        focusedTextColor = TxtMain,
-                        unfocusedTextColor = TxtMain,
+                        focusedTextColor = TextMain,
+                        unfocusedTextColor = TextMain,
                         cursorColor = BlueA,
+                        focusedLabelColor = BlueA,
+                        unfocusedLabelColor = TextMuted,
                     ),
                 )
             }
             Button(
                 onClick = { onWrite(def.address, editable.editedValue) },
                 enabled = editable.dirty,
+                modifier = Modifier.height(54.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = BlueA,
                     contentColor = Color.White,
                     disabledContainerColor = TrackClr,
-                    disabledContentColor = TxtMuted,
+                    disabledContentColor = TextMuted,
                 ),
-                shape = RoundedCornerShape(3.dp),
+                shape = RoundedCornerShape(16.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
             ) {
-                Text("WRITE", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Write", fontSize = 13.sp, fontWeight = FontWeight.Black)
             }
         }
     }
 }
 
-// ── Debug screen ───────────────────────────────────────────────────────────────
 @Composable
 private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<PacketLogEntry>) {
-    Column(
-        Modifier.fillMaxSize().padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Panel(Modifier.fillMaxWidth()) {
-            Text("USB Device", color = TxtMain, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(5.dp))
-            MonoRow("VID / PID",   "${usb.deviceInfo.vendorId.hex16()} / ${usb.deviceInfo.productId.hex16()}")
-            MonoRow("Interface",   "${usb.deviceInfo.interfaceId}   IN: ${usb.deviceInfo.inEndpoint}   OUT: ${usb.deviceInfo.outEndpoint}")
-            MonoRow("Poll",        "${"%.1f".format(snapshot.pollingRateHz)} Hz")
-            MonoRow("Input CRC",   snapshot.input?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "—")
-            MonoRow("Holding CRC", snapshot.holding?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "—")
-            MonoRow("Error",       snapshot.error ?: "none")
-            if (usb.detectedDevices.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                Text("Detected USB devices", color = TxtMain, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(3.dp))
-                usb.detectedDevices.forEach { line ->
-                    Text(line, color = TxtLabel, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        item {
+            SectionHeading("Diagnostics", "USB, CRC, and communication log")
+        }
+        item {
+            TelemetryPanel(Modifier.fillMaxWidth(), accent = BlueA) {
+                Text("USB Device", color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(10.dp))
+                MonoRow("VID / PID", "${usb.deviceInfo.vendorId.hex16()} / ${usb.deviceInfo.productId.hex16()}")
+                MonoRow("Interface", "${usb.deviceInfo.interfaceId}  IN ${usb.deviceInfo.inEndpoint}  OUT ${usb.deviceInfo.outEndpoint}")
+                MonoRow("Poll", "${formatOne(snapshot.pollingRateHz)} Hz")
+                MonoRow("Input CRC", snapshot.input?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "PENDING")
+                MonoRow("Holding CRC", snapshot.holding?.crc?.let { if (it.ok) "PASS" else "FAIL" } ?: "PENDING")
+                MonoRow("Error", snapshot.error ?: "none")
+                if (usb.detectedDevices.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("Detected USB devices", color = TextLabel, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(6.dp))
+                    usb.detectedDevices.forEach { line ->
+                        Text(line, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                    }
                 }
             }
         }
-        Panel(Modifier.fillMaxWidth().weight(1f)) {
-            Text("Communication Log", color = TxtMain, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(5.dp))
-            LazyColumn(Modifier.fillMaxHeight()) {
-                if (logs.isEmpty()) {
-                    item { Text("No communication yet.", color = TxtMuted, fontFamily = FontFamily.Monospace, fontSize = 10.sp) }
-                } else {
-                    items(logs, key = { it.id }) { entry ->
-                        val color = when (entry.direction) {
-                            "TX"  -> Color(0xFF1050A0)
-                            "RX"  -> Color(0xFF0E7050)
-                            else  -> TxtLabel
+        item {
+            TelemetryPanel(Modifier.fillMaxWidth().height(420.dp), accent = GreenA) {
+                Text("Communication Log", color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(Modifier.fillMaxHeight()) {
+                    if (logs.isEmpty()) {
+                        item {
+                            Text("No communication yet.", color = TextMuted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                         }
-                        Text(entry.displayText, color = color, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                    } else {
+                        items(logs, key = { it.id }) { entry ->
+                            val color = when (entry.direction) {
+                                "TX" -> BlueA
+                                "RX" -> GreenA
+                                else -> TextMuted
+                            }
+                            Text(entry.displayText, color = color, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                        }
                     }
                 }
             }
@@ -970,100 +1256,77 @@ private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<
     }
 }
 
-// ── Narrow fallback (phones / portrait) ───────────────────────────────────────
 @Composable
-private fun NarrowMonitor(
-    snapshot: PollingSnapshot,
-    usb: UsbHidState,
-    rpmEv: EngineeringValue,
-    pwmEv: EngineeringValue,
-    reqEv: EngineeringValue,
-    syncEv: EngineeringValue,
-    currEv: EngineeringValue,
-    posEv: EngineeringValue,
-) {
-    LazyColumn(
-        Modifier.fillMaxSize().padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+private fun MonoRow(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Panel(Modifier.weight(1f).height(165.dp)) {
-                    ArcGauge("ENGINE SPEED",   rpmEv.displayValue,                       4000.0, rpmEv.text, BlueA,  Modifier.fillMaxSize())
-                }
-                Panel(Modifier.weight(1f).height(165.dp)) {
-                    ArcGauge("PWM / ACTUATOR", pwmEv.displayValue.coerceAtMost(100.0), 100.0, pwmEv.text, AmberA, Modifier.fillMaxSize())
-                }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TelCard("ENGINE SPEED",    rpmEv.text,  BlueA,   Modifier.weight(1f))
-                TelCard("REQUESTED SPEED", reqEv.text,  TxtMain, Modifier.weight(1f))
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TelCard("ACT. CURRENT", currEv.text, if (currEv.outOfRange) RedA else TxtMain, Modifier.weight(1f))
-                TelCard("SYNC VOLTAGE", syncEv.text, TxtMain, Modifier.weight(1f))
-            }
-        }
-        item { ActuatorBar(posEv, Modifier.fillMaxWidth()) }
-        item { StatusPanel(snapshot, usb) }
+        Text(label, color = TextMuted, fontSize = 11.sp, modifier = Modifier.width(92.dp), textAlign = TextAlign.End)
+        Text(value, color = TextLabel, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
     }
 }
 
-// ── Shared layout primitives ───────────────────────────────────────────────────
-@Composable
-private fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier
-            .background(PanelBg, RoundedCornerShape(5.dp))
-            .border(1.dp, BorderClr, RoundedCornerShape(5.dp))
-            .padding(11.dp),
-        content = content,
+private fun statusItems(snapshot: PollingSnapshot, usb: UsbHidState): List<StatusItem> {
+    val input = snapshot.input
+    val speed2 = input?.inputBits?.get("Speed2 input") == true
+    val speed3 = input?.inputBits?.get("Speed3 input") == true
+    val gainInput = input?.inputBits?.get("Gain input") == true
+    val pickupSensorPresent = (input?.engineSpeedRpm ?: 0) > 1
+    return listOf(
+        StatusItem("Connection", usb.connected, GreenA),
+        StatusItem("Controller", snapshot.controllerOnline, GreenA),
+        StatusItem("Overspeed", input?.statusBits?.get("Overspeed occurred") == true, RedA),
+        StatusItem("Over Current", input?.statusBits?.get("Actuator overcurrent") == true, RedA),
+        StatusItem("Droop", input?.statusBits?.get("Droop input status") == true, AmberA),
+        StatusItem("Gain 2", input?.statusBits?.get("Gain2 selection input") == true, AmberA),
+        StatusItem("Function Key", input?.inputBits?.get("Fn key") == true, BlueA),
+        StatusItem("Plus Key", input?.inputBits?.get("Plus key") == true, BlueA),
+        StatusItem("Minus Key", input?.inputBits?.get("Minus key") == true, BlueA),
+        StatusItem("Idle Input", input?.inputBits?.get("Idle input") == true, GreenA),
+        StatusItem("Pickup Sensor Input", pickupSensorPresent, GreenA),
+        StatusItem("Speed Inputs", speed2 || speed3 || gainInput, CyanA),
+        StatusItem("Speed 2 Input", speed2, CyanA),
+        StatusItem("Speed 3 Input", speed3, CyanA),
+        StatusItem("Gain Input", gainInput, CyanA),
     )
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(Modifier.width(3.dp).height(11.dp).background(BlueA, RoundedCornerShape(1.dp)))
-        Text(text, color = TxtLabel, fontSize = 9.sp, fontWeight = FontWeight.Black, letterSpacing = 0.8.sp)
-    }
+private fun rememberPulse(active: Boolean): Float {
+    val transition = rememberInfiniteTransition(label = "pulse")
+    val pulse by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pulseFloat",
+    )
+    return if (active) pulse else 0f
 }
 
-@Composable
-private fun InfoChip(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier
-            .background(CardBg, RoundedCornerShape(3.dp))
-            .border(1.dp, BorderClr, RoundedCornerShape(3.dp))
-            .padding(horizontal = 7.dp, vertical = 5.dp),
-    ) {
-        Text(label, color = TxtMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
-        Text(value, color = TxtLabel, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-    }
+private fun splitValue(text: String): Pair<String, String> {
+    val parts = text.split(" ", limit = 2)
+    return parts.first() to parts.getOrElse(1) { "" }
 }
 
-@Composable
-private fun MonoRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, color = TxtMuted, fontSize = 10.sp, modifier = Modifier.width(90.dp), textAlign = TextAlign.End)
-        Text(value, color = TxtLabel, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-    }
-}
+private fun formatOne(value: Float): String = String.format(Locale.US, "%.1f", value)
 
-// ── Formatting helpers ─────────────────────────────────────────────────────────
+private fun formatTwo(value: Float): String = String.format(Locale.US, "%.2f", value)
+
 private fun formatFirmware(raw: Int?): String {
     if (raw == null || raw == 0) return "--"
-    return "v${(raw shr 8) and 0xFF}.${(raw and 0xFF).toString().padStart(2, '0')}"
+    val majorByte = (raw shr 8) and 0xFF
+    val minorByte = raw and 0xFF
+    return "$majorByte.$minorByte"
 }
 
 private fun formatControllerType(raw: Int?): String {
     if (raw == null || raw == 0) return "--"
-    return "0x${raw.toString(16).uppercase().padStart(4, '0')}"
+    return when (raw) {
+        0x006E -> "100"
+        else -> raw.toString()
+    }
 }
