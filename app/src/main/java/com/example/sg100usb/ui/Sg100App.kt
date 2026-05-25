@@ -1459,9 +1459,9 @@ private fun formatTwo(value: Float): String = String.format(Locale.US, "%.2f", v
 
 private fun formatFirmware(raw: Int?): String {
     if (raw == null || raw == 0) return "--"
-    val majorByte = (raw shr 8) and 0xFF
-    val minorByte = raw and 0xFF
-    return "$majorByte.$minorByte"
+    val major = raw / 100
+    val minor = raw % 100
+    return "$major.${minor.toString().padStart(2, '0')}"
 }
 
 private fun formatControllerType(raw: Int?): String {
