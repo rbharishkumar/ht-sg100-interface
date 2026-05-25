@@ -16,6 +16,8 @@ import com.example.sg100usb.protocol.PacketLogger
 import com.example.sg100usb.usb.UsbHidManager
 import com.example.sg100usb.usb.UsbHidState
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
@@ -27,25 +29,44 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val pollingManager = PollingManager(repository, graphManager, packetLogger, viewModelScope)
 
     val usbState: StateFlow<UsbHidState> = usbHidManager.state
+
+    init {
+        // Reload holding registers whenever the USB connection is established.
+        viewModelScope.launch {
+            usbHidManager.state
+                .map { it.connected }
+                .distinctUntilChanged()
+                .collect { connected ->
+                    if (connected) loadHoldingRegisters()
+                }
+        }
+    }
     val polling: StateFlow<PollingSnapshot> = pollingManager.snapshot
     val graph: StateFlow<GraphSeries> = graphManager.series
     val packetLog: StateFlow<List<PacketLogEntry>> = packetLogger.entries
     val settings: StateFlow<Map<Int, EditableRegister>> = settingsManager.edited
 
+    private suspend fun loadHoldingRegisters() {
+        repeat(3) { attempt ->
+            if (attempt > 0) kotlinx.coroutines.delay(400)
+            val result = runCatching { repository.readHoldingRegisters() }
+            result.onSuccess { block ->
+                settingsManager.loadHoldingRegisters(block.registers)
+                packetLogger.message("CFG", "Loaded ${block.registers.size} holding registers")
+                return
+            }
+            result.onFailure {
+                packetLogger.message("CFG", "Holding read attempt ${attempt + 1} failed: ${it.message}")
+            }
+        }
+    }
+
     fun connect() {
         viewModelScope.launch {
             packetLogger.message("USB", "Connect requested")
-            runCatching { repository.connect() }.onSuccess {
-                runCatching {
-                    val holding = repository.readHoldingRegisters()
-                    settingsManager.loadHoldingRegisters(holding.registers)
-                    packetLogger.message("CFG", "Loaded ${holding.registers.size} holding registers")
-                }.onFailure {
-                    packetLogger.message("CFG", "Holding read failed: ${it.message}")
-                }
-            }.onFailure {
-                packetLogger.message("USB", it.message ?: "Connection failed")
-            }
+            runCatching { repository.connect() }
+                .onSuccess { loadHoldingRegisters() }
+                .onFailure { packetLogger.message("USB", it.message ?: "Connection failed") }
         }
     }
 
@@ -58,16 +79,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun startPolling() {
         viewModelScope.launch {
             packetLogger.message("USB", "Connect requested before polling")
-            runCatching { repository.connect() }.onSuccess {
-                runCatching {
-                    val holding = repository.readHoldingRegisters()
-                    settingsManager.loadHoldingRegisters(holding.registers)
-                }.onFailure {
-                    packetLogger.message("CFG", "Holding read failed: ${it.message}")
-                }
-            }.onFailure {
-                packetLogger.message("USB", it.message ?: "Connection failed")
-            }
+            runCatching { repository.connect() }
+                .onSuccess { loadHoldingRegisters() }
+                .onFailure { packetLogger.message("USB", it.message ?: "Connection failed") }
             pollingManager.start()
         }
     }
