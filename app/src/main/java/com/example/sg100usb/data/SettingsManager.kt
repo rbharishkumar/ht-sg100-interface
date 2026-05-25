@@ -51,6 +51,7 @@ class SettingsManager {
         _edited.update { current ->
             val existing = current[address] ?: return@update current
             current + (address to existing.copy(
+                register = existing.register.copy(raw = actualValue),
                 editedValue = actualValue,
                 dirty = false,
                 writeStatus = WriteStatus.Success,

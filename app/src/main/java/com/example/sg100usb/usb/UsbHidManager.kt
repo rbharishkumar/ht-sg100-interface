@@ -31,6 +31,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class UsbDeviceInfo(
@@ -207,6 +208,73 @@ class UsbHidManager(private val context: Context) {
             message = "Connected ${device.vendorId.hex16()}:${device.productId.hex16()} ($reason)",
             detectedDevices = describeConnectedDevices(),
         )
+    }
+
+    /**
+     * Exclusive write path for FC06 holding-register writes.
+     *
+     * Stops the background RX/TX workers so no polling FC04 traffic can land in the
+     * receive buffer during the write window. Sends the packet directly via bulkTransfer
+     * and reads the echo with a tight polling loop. Workers are always restarted in the
+     * finally block so the telemetry path is never permanently disrupted.
+     */
+    suspend fun exclusiveWrite(packet: ByteArray, timeoutMs: Int = 500): ByteArray {
+        val conn = connection ?: error("USB HID is not connected")
+        val inp  = inEndpoint  ?: error("No IN endpoint")
+        val out  = outEndpoint ?: error("No OUT endpoint")
+
+        // Stop workers and drain every queue/buffer so the bus is silent.
+        val txToCancel = txJob
+        val rxToCancel = rxJob
+        txJob = null
+        rxJob = null
+        activeCommand?.response?.completeExceptionally(
+            IllegalStateException("Interrupted by exclusive write")
+        )
+        activeCommand = null
+        drainTxQueue(priorityTxQueue)
+        drainTxQueue(pollingTxQueue)
+        txToCancel?.cancelAndJoin()
+        rxToCancel?.cancelAndJoin()
+        drainRxQueue()
+
+        return withContext(Dispatchers.IO) {
+            try {
+                val ifaceId = claimedInterface?.id ?: 0
+                // HID SET_REPORT: report ID goes in wValue low byte, NOT in the data buffer.
+                // Using outputReport(false) sends the raw 64-byte Modbus frame without a
+                // 0x00 prefix, which matches what HidD_SetOutputReport actually puts on the wire.
+                val ctrlData = outputReport(packet, false)
+                val ctrlWritten = conn.controlTransfer(
+                    0x21, 0x09, 0x0200, ifaceId,
+                    ctrlData, ctrlData.size, WRITE_TIMEOUT_MS,
+                )
+                val usedCtrl = ctrlWritten >= 0
+                if (!usedCtrl) {
+                    // Fall back: interrupt/bulk OUT endpoint (original path).
+                    val shape  = preferredReportIdShape ?: true
+                    val report = outputReport(packet, shape)
+                    val bulkWritten = conn.bulkTransfer(out, report, report.size, WRITE_TIMEOUT_MS)
+                    if (bulkWritten <= 0) error("HID write failed: ctrl=$ctrlWritten bulk=$bulkWritten")
+                }
+
+                // Read echo via interrupt IN endpoint regardless of write path.
+                val deadline = System.currentTimeMillis() + timeoutMs
+                var response: ByteArray? = null
+                while (System.currentTimeMillis() < deadline && response == null) {
+                    val buf   = ByteArray(HID_REPORT_LENGTH)
+                    val waitMs = (deadline - System.currentTimeMillis())
+                        .coerceIn(1L, 50L).toInt()
+                    val count = conn.bulkTransfer(inp, buf, buf.size, waitMs)
+                    if (count > 0) {
+                        response = RegisterDecoder.extractFrame(buf.copyOf(count))
+                    }
+                }
+                response ?: error("No HID response within ${timeoutMs}ms (ctrl=${if (usedCtrl) "ok" else "fail"})")
+            } finally {
+                startWorkers(conn, inp, out)
+            }
+        }
     }
 
     suspend fun exchange(

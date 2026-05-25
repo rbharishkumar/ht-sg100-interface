@@ -79,6 +79,25 @@ class PollingManager(
         job = null
     }
 
+    private var pollWasRunning = false
+
+    fun pause() {
+        pollWasRunning = job?.isActive == true
+        if (pollWasRunning) {
+            job?.cancel()
+            job = null
+            packetLogger.message("POLL", "Paused for write")
+        }
+    }
+
+    fun resume() {
+        if (pollWasRunning) {
+            pollWasRunning = false
+            start()
+            packetLogger.message("POLL", "Resumed after write")
+        }
+    }
+
     private companion object {
         const val VISIBLE_FAILURE_THRESHOLD = 3
     }
