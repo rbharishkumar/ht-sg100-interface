@@ -34,7 +34,15 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun connect() {
         viewModelScope.launch {
             packetLogger.message("USB", "Connect requested")
-            runCatching { repository.connect() }.onFailure {
+            runCatching { repository.connect() }.onSuccess {
+                runCatching {
+                    val holding = repository.readHoldingRegisters()
+                    settingsManager.loadHoldingRegisters(holding.registers)
+                    packetLogger.message("CFG", "Loaded ${holding.registers.size} holding registers")
+                }.onFailure {
+                    packetLogger.message("CFG", "Holding read failed: ${it.message}")
+                }
+            }.onFailure {
                 packetLogger.message("USB", it.message ?: "Connection failed")
             }
         }
@@ -49,7 +57,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun startPolling() {
         viewModelScope.launch {
             packetLogger.message("USB", "Connect requested before polling")
-            runCatching { repository.connect() }.onFailure {
+            runCatching { repository.connect() }.onSuccess {
+                runCatching {
+                    val holding = repository.readHoldingRegisters()
+                    settingsManager.loadHoldingRegisters(holding.registers)
+                }.onFailure {
+                    packetLogger.message("CFG", "Holding read failed: ${it.message}")
+                }
+            }.onFailure {
                 packetLogger.message("USB", it.message ?: "Connection failed")
             }
             pollingManager.start()
