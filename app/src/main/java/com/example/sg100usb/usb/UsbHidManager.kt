@@ -328,13 +328,30 @@ class UsbHidManager(private val context: Context) {
     }
 
     private suspend fun waitForResponse(timeoutMs: Int): ByteArray? {
+        // Accumulate HID reports in case the Modbus frame spans more than one 64-byte report.
+        // A 31-register holding response is 67 bytes, which overflows one report by 3 bytes.
+        val modbusBuffer = mutableListOf<Byte>()
+        var payloadOffset = -1  // detected from first report: 1 if report-ID byte present, else 0
         var validResponse: ByteArray? = null
         withTimeoutOrNull(timeoutMs.toLong()) {
             while (validResponse == null) {
-                val response = rxQueue.receive()
-                if (RegisterDecoder.extractFrame(response) != null) {
-                    validResponse = response
+                val report = rxQueue.receive()
+                // Always try the single-report path first (handles the common 27-register case).
+                if (modbusBuffer.isEmpty()) {
+                    val frame = RegisterDecoder.extractFrame(report)
+                    if (frame != null) {
+                        validResponse = frame
+                        return@withTimeoutOrNull
+                    }
                 }
+                // Frame is not complete in this report — start/continue multi-report assembly.
+                if (payloadOffset == -1) {
+                    payloadOffset = if (report.isNotEmpty() && report[0] == 0.toByte()) 1 else 0
+                }
+                for (i in payloadOffset until report.size) modbusBuffer.add(report[i])
+                if (modbusBuffer.size > MAX_MULTI_REPORT_BYTES) break
+                val frame = RegisterDecoder.extractFrame(modbusBuffer.toByteArray())
+                if (frame != null) validResponse = frame
             }
         }
         return validResponse
@@ -444,6 +461,7 @@ class UsbHidManager(private val context: Context) {
         private const val WRITE_TIMEOUT_MS = 250
         private const val RESPONSE_TIMEOUT_MS = 300
         private const val RX_READ_TIMEOUT_MS = 20
+        private const val MAX_MULTI_REPORT_BYTES = 192  // 3 × 64-byte reports max
         private const val SG100_VENDOR_ID = 0x04D8
         private const val SG100_PRODUCT_ID = 0xF1BB
     }

@@ -34,7 +34,7 @@ object Sg100Registers {
     const val REQUESTED_SPEED_REGISTER = 30053
     const val SYNC_VOLTAGE_REGISTER = 30054
     const val HOLDING_START = 40051
-    const val HOLDING_COUNT = 27
+    const val HOLDING_COUNT = 31
 
     val input = listOf(
         RegisterDefinition(30051, "pwm", "PWM / Actuator Position", "%", 0, 100, default = 100,
@@ -106,6 +106,14 @@ object Sg100Registers {
             note = "Raw / 10 = seconds (0.0-25.0 s, default 5.0 s)."),
         RegisterDefinition(40077, "advancedConfig", "Advanced Configuration", "", 0, 65535, true, RegisterControl.NUMERIC, default = 0,
             note = "PACKED REGISTER. Bit 0: OverCurrent Protection (1=Enable). Bit 1: J1939/DST (1=J1939). Bit 2: Speed Trim source (1=Ext, 0=Speed3). Bit 3: Overspeed Latching (1=Latching). Bit 4: Ext speed input polarity (1=Negative). Bits 5-7: Free. Bits 8-15: Bias Voltage (0-100 = 0.0-10.0 V, default 50 = 5.0 V)."),
+        RegisterDefinition(40078, "reserved40078", "Reserved (Do Not Write)", "", 0, 65535, false, RegisterControl.NUMERIC, default = 10,
+            note = "Undocumented factory register. Do not write."),
+        RegisterDefinition(40079, "reserved40079", "Reserved (Do Not Write)", "", 0, 65535, false, RegisterControl.NUMERIC, default = 10,
+            note = "Undocumented factory register. Do not write."),
+        RegisterDefinition(40080, "reserved40080", "Reserved (Do Not Write)", "", 0, 65535, false, RegisterControl.NUMERIC, default = 160,
+            note = "Undocumented factory register. Do not write."),
+        RegisterDefinition(40081, "reserved40081", "Reserved (Do Not Write)", "", 0, 65535, false, RegisterControl.NUMERIC, default = 5120,
+            note = "Undocumented factory register. Do not write."),
     ).associateBy { it.address }
 
     val status30052Bits = linkedMapOf(
