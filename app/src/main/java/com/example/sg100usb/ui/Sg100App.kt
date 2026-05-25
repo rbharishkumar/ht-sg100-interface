@@ -73,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.sg100usb.data.EditableRegister
+import com.example.sg100usb.data.WriteStatus
 import com.example.sg100usb.data.GraphPoint
 import com.example.sg100usb.data.GraphSeries
 import com.example.sg100usb.data.PollingSnapshot
@@ -172,7 +173,7 @@ fun Sg100App(viewModel: DashboardViewModel) {
                         }
                         2 -> {
                             val settings by viewModel.settings.collectAsState()
-                            ConfigScreen(settings, viewModel::editRegister, viewModel::writeRegister)
+                            ConfigScreen(settings, viewModel::editRegister, viewModel::writeRegister, viewModel::clearWriteStatus)
                         }
                         3 -> {
                             val usb by viewModel.usbState.collectAsState()
@@ -1087,6 +1088,7 @@ private fun ConfigScreen(
     settings: Map<Int, EditableRegister>,
     onEdit: (Int, Int) -> Unit,
     onWrite: (Int, Int) -> Unit,
+    onClearStatus: (Int) -> Unit,
 ) {
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -1094,10 +1096,23 @@ private fun ConfigScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            SectionHeading("Configure", "Holding registers and write controls")
+            SectionHeading("Configure", "Holding registers — connect first to load device values")
+        }
+        if (settings.isEmpty()) {
+            item {
+                TelemetryPanel(Modifier.fillMaxWidth(), accent = TextMuted) {
+                    Text(
+                        "No register values loaded. Press Connect to read current device settings.",
+                        color = TextMuted,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    )
+                }
+            }
         }
         items(settings.values.sortedBy { it.register.definition.address }) { editable ->
-            ConfigRow(editable, onEdit, onWrite)
+            ConfigRow(editable, onEdit, onWrite, onClearStatus)
         }
     }
 }
@@ -1107,10 +1122,27 @@ private fun ConfigRow(
     editable: EditableRegister,
     onEdit: (Int, Int) -> Unit,
     onWrite: (Int, Int) -> Unit,
+    onClearStatus: (Int) -> Unit,
 ) {
     val def = editable.register.definition
     var text by remember(editable.editedValue) { mutableStateOf(editable.editedValue.toString()) }
-    TelemetryPanel(Modifier.fillMaxWidth(), accent = if (editable.dirty) AmberA else BlueA) {
+
+    val accentColor = when (editable.writeStatus) {
+        WriteStatus.Success -> GreenA
+        WriteStatus.Error -> RedA
+        WriteStatus.Pending -> AmberA
+        WriteStatus.Idle -> if (editable.dirty) AmberA else BlueA
+    }
+
+    // Auto-clear success status after 3 seconds
+    androidx.compose.runtime.LaunchedEffect(editable.writeStatus) {
+        if (editable.writeStatus == WriteStatus.Success) {
+            kotlinx.coroutines.delay(3000)
+            onClearStatus(def.address)
+        }
+    }
+
+    TelemetryPanel(Modifier.fillMaxWidth(), accent = accentColor) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1118,18 +1150,33 @@ private fun ConfigRow(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(def.label, color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.Black)
-                Text("${def.address}  Current ${editable.register.raw} ${def.unit}".trim(), color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                Text(
+                    "${def.address}  Device value: ${editable.register.raw}  Default: ${def.default} ${def.unit}".trim(),
+                    color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                )
             }
-            if (editable.dirty) {
-                Text("MODIFIED", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            when (editable.writeStatus) {
+                WriteStatus.Pending -> Text("SENDING…", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                WriteStatus.Success -> Text("WRITE OK", color = GreenA, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                WriteStatus.Error -> Text("FAILED", color = RedA, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                WriteStatus.Idle -> if (editable.dirty) Text("MODIFIED", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Black)
             }
         }
+        if (editable.writeStatus == WriteStatus.Error && editable.writeError != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(editable.writeError, color = RedA, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        if (def.note.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(def.note, color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
+        }
         Spacer(Modifier.height(12.dp))
-        if (def.max <= 6000 && def.control != RegisterControl.SWITCH) {
+        if (def.control == RegisterControl.SLIDER && def.max > 0) {
             Slider(
                 value = editable.editedValue.toFloat(),
                 onValueChange = { onEdit(def.address, it.toInt()) },
                 valueRange = def.min.toFloat()..def.max.toFloat(),
+                enabled = editable.writeStatus != WriteStatus.Pending,
                 colors = SliderDefaults.colors(
                     thumbColor = BlueA,
                     activeTrackColor = BlueA,
@@ -1152,6 +1199,7 @@ private fun ConfigRow(
                     Switch(
                         checked = editable.editedValue != 0,
                         onCheckedChange = { onEdit(def.address, if (it) 1 else 0) },
+                        enabled = editable.writeStatus != WriteStatus.Pending,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = TextMain,
                             checkedTrackColor = BlueA,
@@ -1159,7 +1207,10 @@ private fun ConfigRow(
                             uncheckedTrackColor = TrackClr,
                         ),
                     )
-                    Text(if (editable.editedValue != 0) "Enabled" else "Disabled", color = TextLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (editable.editedValue != 0) "Enabled" else "Disabled",
+                        color = TextLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    )
                 }
             } else {
                 OutlinedTextField(
@@ -1170,7 +1221,8 @@ private fun ConfigRow(
                     },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    label = { Text("Value", color = TextMuted) },
+                    enabled = editable.writeStatus != WriteStatus.Pending,
+                    label = { Text("Value (${def.min}–${def.max})", color = TextMuted) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = BlueA,
                         unfocusedBorderColor = BorderClr,
@@ -1184,10 +1236,14 @@ private fun ConfigRow(
             }
             Button(
                 onClick = { onWrite(def.address, editable.editedValue) },
-                enabled = editable.dirty,
+                enabled = editable.dirty && editable.writeStatus != WriteStatus.Pending && def.writable,
                 modifier = Modifier.height(54.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = BlueA,
+                    containerColor = when (editable.writeStatus) {
+                        WriteStatus.Success -> GreenA
+                        WriteStatus.Error -> RedA
+                        else -> BlueA
+                    },
                     contentColor = Color.White,
                     disabledContainerColor = TrackClr,
                     disabledContentColor = TextMuted,
@@ -1195,7 +1251,15 @@ private fun ConfigRow(
                 shape = RoundedCornerShape(16.dp),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
             ) {
-                Text("Write", fontSize = 13.sp, fontWeight = FontWeight.Black)
+                Text(
+                    when (editable.writeStatus) {
+                        WriteStatus.Pending -> "…"
+                        WriteStatus.Success -> "OK"
+                        WriteStatus.Error -> "Retry"
+                        WriteStatus.Idle -> "Write"
+                    },
+                    fontSize = 13.sp, fontWeight = FontWeight.Black,
+                )
             }
         }
     }
@@ -1209,7 +1273,7 @@ private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            SectionHeading("Diagnostics", "USB, CRC, and communication log")
+            SectionHeading("Diagnostics", "USB, CRC, communication log, and register reference")
         }
         item {
             TelemetryPanel(Modifier.fillMaxWidth(), accent = BlueA) {
@@ -1253,6 +1317,83 @@ private fun DebugScreen(usb: UsbHidState, snapshot: PollingSnapshot, logs: List<
                 }
             }
         }
+        item {
+            RegisterReferenceSection()
+        }
+    }
+}
+
+@Composable
+private fun RegisterReferenceSection() {
+    Column(Modifier.fillMaxWidth()) {
+        SectionHeading("Register Reference", "Full SG-100 Modbus register map")
+        Spacer(Modifier.height(10.dp))
+        TelemetryPanel(Modifier.fillMaxWidth(), accent = CyanA) {
+            Text("Input Registers (Read Only)", color = CyanA, fontSize = 13.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(8.dp))
+            com.example.sg100usb.protocol.Sg100Registers.input.values
+                .sortedBy { it.address }
+                .forEach { def ->
+                    RegisterRefRow(def)
+                }
+        }
+        Spacer(Modifier.height(10.dp))
+        TelemetryPanel(Modifier.fillMaxWidth(), accent = AmberA) {
+            Text("Holding Registers (Read / Write)", color = AmberA, fontSize = 13.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(8.dp))
+            com.example.sg100usb.protocol.Sg100Registers.holding.values
+                .sortedBy { it.address }
+                .forEach { def ->
+                    RegisterRefRow(def)
+                }
+        }
+    }
+}
+
+@Composable
+private fun RegisterRefRow(def: com.example.sg100usb.protocol.RegisterDefinition) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Text(
+                def.address.toString(),
+                color = CyanA,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.width(52.dp),
+            )
+            Column(Modifier.weight(1f)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(def.label, color = TextMain, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (def.writable) {
+                        Text("W", color = AmberA, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                    }
+                }
+                val meta = buildString {
+                    if (def.unit.isNotEmpty()) append(def.unit).append("  ")
+                    if (def.min != 0 || def.max != 65535) append("${def.min}–${def.max}  ")
+                    if (def.default != 0) append("default: ${def.default}")
+                }.trim()
+                if (meta.isNotEmpty()) {
+                    Text(meta, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                }
+                if (def.note.isNotEmpty()) {
+                    Text(def.note, color = TextMuted, fontSize = 10.sp, lineHeight = 14.sp)
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(BorderClr.copy(alpha = 0.5f)))
     }
 }
 

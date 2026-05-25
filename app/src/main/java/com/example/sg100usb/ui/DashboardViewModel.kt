@@ -10,6 +10,7 @@ import com.example.sg100usb.data.PollingSnapshot
 import com.example.sg100usb.data.RealTimeGraphManager
 import com.example.sg100usb.data.RegisterRepository
 import com.example.sg100usb.data.SettingsManager
+import com.example.sg100usb.data.WriteResult
 import com.example.sg100usb.protocol.PacketLogEntry
 import com.example.sg100usb.protocol.PacketLogger
 import com.example.sg100usb.usb.UsbHidManager
@@ -77,14 +78,22 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun writeRegister(address: Int, value: Int) {
         viewModelScope.launch {
-            runCatching {
-                repository.writeSingleRegister(address, value)
-                settingsManager.markClean(address, value)
-            }.onFailure {
-                packetLogger.message("WRITE", it.message ?: "Write failed")
+            settingsManager.markPending(address)
+            val result = repository.writeSingleRegister(address, value)
+            when (result) {
+                is WriteResult.Success -> {
+                    settingsManager.markClean(address, value)
+                    packetLogger.message("WRITE", "OK $address=$value")
+                }
+                is WriteResult.Failure -> {
+                    settingsManager.markError(address, result.reason)
+                    packetLogger.message("WRITE", "FAIL $address: ${result.reason}")
+                }
             }
         }
     }
+
+    fun clearWriteStatus(address: Int) = settingsManager.clearWriteStatus(address)
 
     fun setGraphZoom(zoom: Float) = graphManager.setZoom(zoom)
 
