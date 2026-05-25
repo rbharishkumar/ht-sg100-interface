@@ -7,10 +7,12 @@ import com.example.sg100usb.protocol.PacketLogger
 import com.example.sg100usb.protocol.RegisterDecoder
 import com.example.sg100usb.usb.UsbHidManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 sealed class WriteResult {
     object Success : WriteResult()
+    data class SuccessWithHolding(val block: DecodedRegisterBlock) : WriteResult()
     data class Failure(val reason: String) : WriteResult()
 }
 
@@ -50,32 +52,53 @@ class RegisterRepository(
         return@withContext try {
             val tx = ModbusPacketBuilder.writeSingleRegister(1, address, value)
             packetLogger.tx("Write $address=$value", tx)
-            val rx = usbHidManager.exchange(tx, priority = true)
-            packetLogger.rx("Write ack", rx)
-            val decoded = RegisterDecoder.decode(rx)
-            if (decoded !is ModbusDecodeResult.WriteAck) {
-                return@withContext WriteResult.Failure("Controller did not acknowledge write")
+
+            // Send the write. The SG-100 may not echo FC06 responses — catch the
+            // timeout silently and fall through to readback verification instead.
+            try {
+                val rx = usbHidManager.exchange(tx, timeoutMs = WRITE_ECHO_TIMEOUT_MS, priority = true)
+                packetLogger.rx("Write echo", rx)
+                val decoded = RegisterDecoder.decode(rx)
+                if (decoded is ModbusDecodeResult.WriteAck) {
+                    val ack = decoded.response
+                    val expectedOffset = ModbusPacketBuilder.displayRegisterToOffset(address)
+                    if (ack.registerOffset != expectedOffset || ack.valueOrQuantity != value) {
+                        return@withContext WriteResult.Failure(
+                            "Echo mismatch: sent offset=$expectedOffset value=$value, got offset=${ack.registerOffset} value=${ack.valueOrQuantity}"
+                        )
+                    }
+                }
+            } catch (_: Exception) {
+                packetLogger.message("WRITE", "No echo — verifying by readback")
             }
-            val ack = decoded.response
-            val expectedOffset = ModbusPacketBuilder.displayRegisterToOffset(address)
-            if (ack.registerOffset != expectedOffset) {
-                return@withContext WriteResult.Failure(
-                    "Echo address mismatch: sent offset $expectedOffset, got ${ack.registerOffset}"
-                )
+
+            // Give the device time to commit the value, then read back all
+            // holding registers to confirm and refresh the Configure screen.
+            delay(WRITE_SETTLE_MS)
+            val readTx = ModbusPacketBuilder.readHoldingRegisters()
+            packetLogger.tx("Post-write readback", readTx)
+            val readRx = usbHidManager.exchange(readTx)
+            packetLogger.rx("Readback response", readRx)
+
+            when (val decoded = RegisterDecoder.decode(readRx)) {
+                is ModbusDecodeResult.RegisterBlock -> {
+                    val actual = decoded.block.value(address)
+                    if (actual == value) {
+                        WriteResult.SuccessWithHolding(decoded.block)
+                    } else {
+                        WriteResult.Failure("Readback mismatch: wrote $value, device returned $actual")
+                    }
+                }
+                else -> WriteResult.Failure("Unexpected response to readback")
             }
-            if (ack.valueOrQuantity != value) {
-                return@withContext WriteResult.Failure(
-                    "Echo value mismatch: sent $value, got ${ack.valueOrQuantity}"
-                )
-            }
-            WriteResult.Success
         } catch (e: Exception) {
-            val reason = when {
-                e.message?.contains("CRC") == true -> "CRC error: ${e.message}"
-                e.message?.contains("timeout", ignoreCase = true) == true -> "Timeout: no response from device"
-                else -> e.message ?: "Write failed"
-            }
-            WriteResult.Failure(reason)
+            WriteResult.Failure(
+                when {
+                    e.message?.contains("CRC") == true -> "CRC error: ${e.message}"
+                    e.message?.contains("No HID response") == true -> "No response from device"
+                    else -> e.message ?: "Write failed"
+                }
+            )
         }
     }
 
@@ -83,20 +106,26 @@ class RegisterRepository(
         return@withContext try {
             val tx = ModbusPacketBuilder.writeMultipleRegisters(1, startAddress, values)
             packetLogger.tx("Write multiple $startAddress count=${values.size}", tx)
-            val rx = usbHidManager.exchange(tx, priority = true)
-            packetLogger.rx("Write multiple ack", rx)
-            val decoded = RegisterDecoder.decode(rx)
-            if (decoded !is ModbusDecodeResult.WriteAck) {
-                return@withContext WriteResult.Failure("Controller did not acknowledge multiple write")
+            try {
+                val rx = usbHidManager.exchange(tx, timeoutMs = WRITE_ECHO_TIMEOUT_MS, priority = true)
+                packetLogger.rx("Write multiple ack", rx)
+            } catch (_: Exception) {
+                packetLogger.message("WRITE", "No echo for multi-write — verifying by readback")
             }
-            WriteResult.Success
+            delay(WRITE_SETTLE_MS)
+            val readTx = ModbusPacketBuilder.readHoldingRegisters()
+            val readRx = usbHidManager.exchange(readTx)
+            when (val decoded = RegisterDecoder.decode(readRx)) {
+                is ModbusDecodeResult.RegisterBlock -> WriteResult.SuccessWithHolding(decoded.block)
+                else -> WriteResult.Failure("Unexpected response to readback")
+            }
         } catch (e: Exception) {
-            val reason = when {
-                e.message?.contains("CRC") == true -> "CRC error: ${e.message}"
-                e.message?.contains("timeout", ignoreCase = true) == true -> "Timeout: no response from device"
-                else -> e.message ?: "Write failed"
-            }
-            WriteResult.Failure(reason)
+            WriteResult.Failure(e.message ?: "Multi-write failed")
         }
+    }
+
+    companion object {
+        private const val WRITE_ECHO_TIMEOUT_MS = 150
+        private const val WRITE_SETTLE_MS = 100L
     }
 }

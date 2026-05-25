@@ -79,11 +79,15 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun writeRegister(address: Int, value: Int) {
         viewModelScope.launch {
             settingsManager.markPending(address)
-            val result = repository.writeSingleRegister(address, value)
-            when (result) {
+            when (val result = repository.writeSingleRegister(address, value)) {
                 is WriteResult.Success -> {
                     settingsManager.markClean(address, value)
                     packetLogger.message("WRITE", "OK $address=$value")
+                }
+                is WriteResult.SuccessWithHolding -> {
+                    settingsManager.markClean(address, value)
+                    settingsManager.loadHoldingRegisters(result.block.registers)
+                    packetLogger.message("WRITE", "OK $address=$value (verified)")
                 }
                 is WriteResult.Failure -> {
                     settingsManager.markError(address, result.reason)
