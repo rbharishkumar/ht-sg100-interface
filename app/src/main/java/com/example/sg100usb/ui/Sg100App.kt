@@ -248,24 +248,13 @@ private fun AppHeader(viewModel: DashboardViewModel) {
             HeaderChip("CTRL", formatControllerType(input?.value(30063)), CyanA)
             HeaderChip("POLL", if (polling.pollingRateHz > 0f) "${formatOne(polling.pollingRateHz)} Hz" else "Idle", AmberA)
         }
-        Spacer(Modifier.height(12.dp))
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            HeaderActionButton(
-                label = if (connected) "Disconnect" else "Connect",
-                tint = if (connected) RedA else BlueA,
-                active = connected,
-                modifier = Modifier.weight(1f),
-                onClick = { if (connected) viewModel.disconnect() else viewModel.connect() },
-            )
-            SplitRunControl(
-                onStart = viewModel::startPolling,
-                onStop = viewModel::stopPolling,
-                modifier = Modifier.weight(1.25f),
-            )
-        }
+        Spacer(Modifier.height(10.dp))
+        AutoStatusBar(
+            connected = connected,
+            controllerOnline = controllerOnline,
+            permissionPending = usb.permissionPending,
+            pollingHz = polling.pollingRateHz,
+        )
     }
 }
 
@@ -307,70 +296,46 @@ private fun HeaderChip(label: String, value: String, tint: Color) {
 }
 
 @Composable
-private fun HeaderActionButton(
-    label: String,
-    tint: Color,
-    active: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
+private fun AutoStatusBar(
+    connected: Boolean,
+    controllerOnline: Boolean,
+    permissionPending: Boolean,
+    pollingHz: Float,
 ) {
-    val pulse = rememberPulse(active)
-    Button(
-        onClick = onClick,
-        modifier = modifier
-            .height(48.dp)
-            .shadow(if (active) (8 + pulse * 4).dp else 2.dp, RoundedCornerShape(16.dp)),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = tint.copy(alpha = if (active) 0.28f else 0.18f),
-            contentColor = TextMain,
-        ),
-        shape = RoundedCornerShape(16.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-    ) {
-        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Black, maxLines = 1)
+    val (text, color, pulsing) = when {
+        connected && controllerOnline ->
+            Triple("Connected to SG100  ·  ${formatOne(pollingHz)} Hz", GreenA, false)
+        connected ->
+            Triple("SG100 linked — starting telemetry…", AmberA, true)
+        permissionPending ->
+            Triple("Tap OK to allow USB access", AmberA, true)
+        else ->
+            Triple("Searching for SG100…", TextMuted, true)
     }
-}
-
-@Composable
-private fun SplitRunControl(
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+    val pulse = rememberPulse(pulsing)
     Row(
-        modifier
-            .height(48.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF0E1720))
-            .border(1.dp, BorderClr, RoundedCornerShape(16.dp))
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(color.copy(alpha = 0.07f + pulse * 0.05f))
+            .border(1.dp, color.copy(alpha = 0.22f + pulse * 0.1f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
             Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClick = onStart)
-                .background(BlueA.copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("Start", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Black)
-        }
-        Box(
-            Modifier
-                .width(1.dp)
-                .fillMaxHeight()
-                .background(BorderClr)
+                .size((7 + pulse * 2).dp)
+                .background(color.copy(alpha = 0.8f + pulse * 0.2f), CircleShape)
         )
-        Box(
-            Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClick = onStop)
-                .background(RedA.copy(alpha = 0.13f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("Stop", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.Black)
-        }
+        Text(
+            text,
+            color = color,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

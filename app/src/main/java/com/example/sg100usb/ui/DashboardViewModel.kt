@@ -15,9 +15,12 @@ import com.example.sg100usb.protocol.PacketLogEntry
 import com.example.sg100usb.protocol.PacketLogger
 import com.example.sg100usb.usb.UsbHidManager
 import com.example.sg100usb.usb.UsbHidState
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
@@ -29,26 +32,51 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val pollingManager = PollingManager(repository, graphManager, packetLogger, viewModelScope)
 
     val usbState: StateFlow<UsbHidState> = usbHidManager.state
-
-    init {
-        // Reload holding registers whenever the USB connection is established.
-        viewModelScope.launch {
-            usbHidManager.state
-                .map { it.connected }
-                .distinctUntilChanged()
-                .collect { connected ->
-                    if (connected) loadHoldingRegisters()
-                }
-        }
-    }
     val polling: StateFlow<PollingSnapshot> = pollingManager.snapshot
     val graph: StateFlow<GraphSeries> = graphManager.series
     val packetLog: StateFlow<List<PacketLogEntry>> = packetLogger.entries
     val settings: StateFlow<Map<Int, EditableRegister>> = settingsManager.edited
 
+    private var reconnectJob: Job? = null
+
+    init {
+        // Attempt to connect immediately — device may already be plugged in at launch.
+        usbHidManager.connectBestDevice()
+        startReconnectLoop()
+
+        viewModelScope.launch {
+            usbHidManager.state
+                .map { it.connected }
+                .distinctUntilChanged()
+                .collect { connected ->
+                    if (connected) {
+                        reconnectJob?.cancel()
+                        loadHoldingRegisters()
+                        pollingManager.start()
+                    } else {
+                        pollingManager.stop()
+                        startReconnectLoop()
+                    }
+                }
+        }
+    }
+
+    private fun startReconnectLoop() {
+        reconnectJob?.cancel()
+        reconnectJob = viewModelScope.launch {
+            while (isActive) {
+                delay(RECONNECT_INTERVAL_MS)
+                val s = usbHidManager.state.value
+                if (!s.connected && !s.permissionPending) {
+                    usbHidManager.connectBestDevice()
+                }
+            }
+        }
+    }
+
     private suspend fun loadHoldingRegisters() {
         repeat(3) { attempt ->
-            if (attempt > 0) kotlinx.coroutines.delay(400)
+            if (attempt > 0) delay(400)
             val result = runCatching { repository.readHoldingRegisters() }
             result.onSuccess { block ->
                 settingsManager.loadHoldingRegisters(block.registers)
@@ -60,33 +88,6 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
     }
-
-    fun connect() {
-        viewModelScope.launch {
-            packetLogger.message("USB", "Connect requested")
-            runCatching { repository.connect() }
-                .onSuccess { loadHoldingRegisters() }
-                .onFailure { packetLogger.message("USB", it.message ?: "Connection failed") }
-        }
-    }
-
-    fun disconnect() {
-        packetLogger.message("USB", "Disconnect requested")
-        pollingManager.stop()
-        usbHidManager.close()
-    }
-
-    fun startPolling() {
-        viewModelScope.launch {
-            packetLogger.message("USB", "Connect requested before polling")
-            runCatching { repository.connect() }
-                .onSuccess { loadHoldingRegisters() }
-                .onFailure { packetLogger.message("USB", it.message ?: "Connection failed") }
-            pollingManager.start()
-        }
-    }
-
-    fun stopPolling() = pollingManager.stop()
 
     fun editRegister(address: Int, value: Int) = settingsManager.edit(address, value)
 
@@ -124,8 +125,13 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun setGraphZoom(zoom: Float) = graphManager.setZoom(zoom)
 
     override fun onCleared() {
+        reconnectJob?.cancel()
         pollingManager.stop()
         usbHidManager.dispose()
         super.onCleared()
+    }
+
+    companion object {
+        private const val RECONNECT_INTERVAL_MS = 3000L
     }
 }

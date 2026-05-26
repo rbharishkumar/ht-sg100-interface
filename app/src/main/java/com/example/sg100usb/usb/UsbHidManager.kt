@@ -135,14 +135,9 @@ class UsbHidManager(private val context: Context) {
         val detected = describeConnectedDevices()
         val candidate = findBestDevice()
         if (candidate == null) {
-            val message = if (detected.isEmpty()) {
-                "No USB devices visible to Android. Check OTG cable, power, and Android USB permission."
-            } else {
-                "USB device visible, but no readable HID-style interface found. See Debug device list."
-            }
             _state.update {
                 it.copy(
-                    message = message,
+                    message = "Searching for SG100…",
                     detectedDevices = detected,
                 )
             }
@@ -154,7 +149,7 @@ class UsbHidManager(private val context: Context) {
             _state.update {
                 it.copy(
                     permissionPending = true,
-                    message = "Waiting for Android USB permission: ${candidate.reason}",
+                    message = "Tap OK to allow USB access",
                     detectedDevices = detected,
                 )
             }
@@ -205,7 +200,7 @@ class UsbHidManager(private val context: Context) {
                 inEndpoint = describeEndpoint(endpoints.first) ?: "none",
                 outEndpoint = describeEndpoint(endpoints.second) ?: "control SET_REPORT",
             ),
-            message = "Connected ${device.vendorId.hex16()}:${device.productId.hex16()} ($reason)",
+            message = "Connected to SG100",
             detectedDevices = describeConnectedDevices(),
         )
     }
@@ -307,7 +302,7 @@ class UsbHidManager(private val context: Context) {
         inEndpoint = null
         outEndpoint = null
         preferredReportIdShape = null
-        _state.value = UsbHidState(message = "Disconnected")
+        _state.value = UsbHidState(message = "SG100 disconnected")
     }
 
     fun dispose() {
