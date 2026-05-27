@@ -1486,12 +1486,13 @@ private fun MonitorScreen(polling: PollingSnapshot) {
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // ── Big live gauges ───────────────────────────────────────────────────
         Row(
-            Modifier.fillMaxWidth().height(130.dp),
+            Modifier.fillMaxWidth().height(110.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CompactGaugePanel("ENGINE RPM", rpm.toDouble(), 4000.0, "$rpm", "RPM", HtGreen, Modifier.weight(1f).fillMaxHeight())
@@ -1499,7 +1500,7 @@ private fun MonitorScreen(polling: PollingSnapshot) {
         }
 
         // ── Secondary readings ────────────────────────────────────────────────
-        Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().height(50.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ReadonlyTile("REQ SPEED",  "$reqSpd RPM",                    HtGreen,  Modifier.weight(1f).fillMaxHeight())
             ReadonlyTile("SYNC V",     String.format(Locale.US, "%.3f V", syncV),  HtGreenLt, Modifier.weight(1f).fillMaxHeight())
             ReadonlyTile("ACT CURRENT",actCurr.text,                     AmberA,   Modifier.weight(1f).fillMaxHeight())
@@ -1508,16 +1509,16 @@ private fun MonitorScreen(polling: PollingSnapshot) {
 
         // ── Governor status bits ──────────────────────────────────────────────
         MonitorPanel(title = "Governor Status") {
-            val statusOrder = listOf(
-                "Droop input status",
-                "Actuator overcurrent",
-                "Gain2 selection input",
-                "Overspeed occurred",
+            val statusItems = listOf(
+                "Droop input status"   to "Droop\nInput",
+                "Actuator overcurrent" to "Actuator\nOvercurrent",
+                "Gain2 selection input" to "Gain2\nSelect",
+                "Overspeed occurred"   to "Overspeed\nOccurred",
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                statusOrder.forEach { label ->
-                    val active = statusBits[label] == true
-                    StatusBitChip(label = label.take(14), active = active, tint = if (label.contains("Overspeed")) RedA else HtGreen, modifier = Modifier.weight(1f))
+                statusItems.forEach { (key, shortLabel) ->
+                    val active = statusBits[key] == true
+                    StatusBitChip(label = shortLabel, active = active, tint = if (key.contains("Overspeed")) RedA else HtGreen, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -1634,7 +1635,7 @@ private fun StatusBitChip(label: String, active: Boolean, tint: Color, modifier:
         Box(Modifier.size(7.dp).background(if (active) tint else BorderClr, CircleShape))
         Text(label, color = if (active) tint else TextMuted, fontSize = 8.sp,
             fontWeight = if (active) FontWeight.Black else FontWeight.Normal,
-            textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            textAlign = TextAlign.Center, maxLines = 2, lineHeight = 10.sp)
     }
 }
 
