@@ -10,6 +10,7 @@
         android:label="SG-100 USB"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/AppTheme">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -19,7 +20,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
@@ -27,5 +27,17 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
         </activity>
+
+        <!-- FileProvider for sharing CSV recordings -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.example.sg100usb.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 </manifest>

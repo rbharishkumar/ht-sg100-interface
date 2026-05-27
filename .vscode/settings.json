@@ -1,0 +1,28 @@
+{
+  "java.jdt.ls.java.home": "C:\\Program Files\\Android\\Android Studio\\jbr",
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-17",
+      "path": "C:\\Program Files\\Android\\Android Studio\\jbr",
+      "default": true
+    }
+  ],
+  "kotlin.languageServer.enabled": true,
+  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+  "python.testing.pytestEnabled": true,
+  "python.testing.cwd": "${workspaceFolder}\\sg100_dashboard",
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "terminal.integrated.env.windows": {
+    "JAVA_HOME": "C:\\Program Files\\Android\\Android Studio\\jbr",
+    "ANDROID_HOME": "C:\\Users\\haris\\AppData\\Local\\Android\\Sdk",
+    "ANDROID_SDK_ROOT": "C:\\Users\\haris\\AppData\\Local\\Android\\Sdk"
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.gradle": true,
+    "**/build": true
+  }
+}

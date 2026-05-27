@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "vscjava.vscode-java-pack",
+    "fwcd.kotlin",
+    "mathiasfrohlich.kotlin",
+    "naco-siren.gradle-language",
+    "redhat.java"
+  ]
+}

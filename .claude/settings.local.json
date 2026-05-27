@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\haris\\\\OneDrive\\\\Documents\\\\New project 2\\\\app\\\\src\\\\main\\\\java\\\\com\\\\example\\\\sg100usb\" -Recurse)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Sort-Object FullName)",
+      "Bash(./gradlew assembleDebug)",
+      "Bash(where java *)",
+      "Read(//c/Program Files/Android/Android Studio/jbr/bin/**)",
+      "Bash(JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" ./gradlew assembleDebug)",
+      "Bash(git add *)",
+      "Read(//c/Program Files \\(x86\\)/Huegli Tech AG/**)",
+      "Bash(.\\\\gradlew assembleDebug)",
+      "Bash(cmd.exe /c \"gradlew.bat assembleDebug 2>&1\")",
+      "Read(//c/Program Files/Android/Android Studio/jbr/**)"
+    ]
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Android: compile debug Kotlin",
+      "type": "shell",
+      "command": ".\\gradlew.bat",
+      "args": [
+        ":app:compileDebugKotlin"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "JAVA_HOME": "C:\\Program Files\\Android\\Android Studio\\jbr",
+          "ANDROID_HOME": "C:\\Users\\haris\\AppData\\Local\\Android\\Sdk",
+          "ANDROID_SDK_ROOT": "C:\\Users\\haris\\AppData\\Local\\Android\\Sdk"
+        }
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Android: install debug",
+      "type": "shell",
+      "command": ".\\gradlew.bat",
+      "args": [
+        ":app:installDebug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "JAVA_HOME": "C:\\Program Files\\Android\\Android Studio\\jbr",
+          "ANDROID_HOME": "C:\\Users\\haris\\AppData\\Local\\Android\\Sdk",
+          "ANDROID_SDK_ROOT": "C:\\Users\\haris\\AppData\\Local\\Android\\Sdk"
+        }
+      },
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Python: install dashboard requirements",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "pip",
+        "install",
+        "-r",
+        "${workspaceFolder}\\sg100_dashboard\\requirements.txt",
+        "pytest"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Python: test dashboard",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "pytest",
+        "tests"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}\\sg100_dashboard"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Python: run dashboard",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "sg100_dashboard.main"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}\\sg100_dashboard"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

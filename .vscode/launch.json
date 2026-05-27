@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: SG100 Dashboard",
+      "type": "python",
+      "request": "launch",
+      "module": "sg100_dashboard.main",
+      "cwd": "${workspaceFolder}\\sg100_dashboard",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
