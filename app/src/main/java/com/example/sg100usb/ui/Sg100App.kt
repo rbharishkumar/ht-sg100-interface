@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -173,7 +175,15 @@ fun Sg100App(viewModel: DashboardViewModel) {
                         }
                         2 -> {
                             val settings by viewModel.settings.collectAsState()
-                            ConfigScreen(settings, viewModel::editRegister, viewModel::writeRegister, viewModel::clearWriteStatus)
+                            val resettingDefaults by viewModel.resettingDefaults.collectAsState()
+                            ConfigScreen(
+                                settings = settings,
+                                onEdit = viewModel::editRegister,
+                                onWrite = viewModel::writeRegister,
+                                onClearStatus = viewModel::clearWriteStatus,
+                                onResetDefaults = viewModel::resetToDefaults,
+                                isResettingDefaults = resettingDefaults,
+                            )
                         }
                         3 -> {
                             val usb by viewModel.usbState.collectAsState()
@@ -1054,7 +1064,49 @@ private fun ConfigScreen(
     onEdit: (Int, Int) -> Unit,
     onWrite: (Int, Int) -> Unit,
     onClearStatus: (Int) -> Unit,
+    onResetDefaults: () -> Unit,
+    isResettingDefaults: Boolean,
 ) {
+    var showResetDialog by remember { mutableStateOf(false) }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            containerColor = PanelBg,
+            titleContentColor = TextMain,
+            textContentColor = TextLabel,
+            title = {
+                Text("Reset to Factory Defaults?", fontWeight = FontWeight.Black)
+            },
+            text = {
+                Text(
+                    "This will write the factory default value to all 26 writable holding registers " +
+                    "on the SG-100. Current configuration will be overwritten.\n\n" +
+                    "Make sure the device is connected before proceeding.",
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetDialog = false
+                        onResetDefaults()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RedA, contentColor = Color.White),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Text("Reset All", fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel", color = TextMuted)
+                }
+            },
+        )
+    }
+
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -1062,6 +1114,12 @@ private fun ConfigScreen(
     ) {
         item {
             SectionHeading("Configure", "Holding registers — connect first to load device values")
+        }
+        item {
+            ResetDefaultsButton(
+                onClick = { showResetDialog = true },
+                isResetting = isResettingDefaults,
+            )
         }
         if (settings.isEmpty()) {
             item {
@@ -1078,6 +1136,59 @@ private fun ConfigScreen(
         }
         items(settings.values.sortedBy { it.register.definition.address }) { editable ->
             ConfigRow(editable, onEdit, onWrite, onClearStatus)
+        }
+    }
+}
+
+@Composable
+private fun ResetDefaultsButton(onClick: () -> Unit, isResetting: Boolean) {
+    val pulse = rememberPulse(isResetting)
+    val borderColor = if (isResetting) AmberA.copy(alpha = 0.4f + pulse * 0.3f) else RedA.copy(alpha = 0.35f)
+    val bgColor = if (isResetting) AmberA.copy(alpha = 0.08f + pulse * 0.05f) else RedA.copy(alpha = 0.08f)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(18.dp))
+            .then(if (!isResetting) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // Warning dot
+        Box(
+            Modifier
+                .size((8 + pulse * 3).dp)
+                .background(
+                    if (isResetting) AmberA.copy(alpha = 0.8f + pulse * 0.2f) else RedA,
+                    CircleShape,
+                )
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (isResetting) "Resetting to factory defaults…" else "Reset to Factory Defaults",
+                color = if (isResetting) AmberA else RedA,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text(
+                if (isResetting)
+                    "Writing default values to all registers, please wait"
+                else
+                    "Overwrites all 26 holding registers with factory values",
+                color = TextMuted,
+                fontSize = 11.sp,
+            )
+        }
+        if (!isResetting) {
+            Text(
+                "RESET",
+                color = RedA,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            )
         }
     }
 }

@@ -13,11 +13,14 @@ import com.example.sg100usb.data.SettingsManager
 import com.example.sg100usb.data.WriteResult
 import com.example.sg100usb.protocol.PacketLogEntry
 import com.example.sg100usb.protocol.PacketLogger
+import com.example.sg100usb.protocol.Sg100Registers
 import com.example.sg100usb.usb.UsbHidManager
 import com.example.sg100usb.usb.UsbHidState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -36,6 +39,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val graph: StateFlow<GraphSeries> = graphManager.series
     val packetLog: StateFlow<List<PacketLogEntry>> = packetLogger.entries
     val settings: StateFlow<Map<Int, EditableRegister>> = settingsManager.edited
+
+    private val _resettingDefaults = MutableStateFlow(false)
+    val resettingDefaults: StateFlow<Boolean> = _resettingDefaults.asStateFlow()
 
     private var reconnectJob: Job? = null
 
@@ -121,6 +127,52 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun clearWriteStatus(address: Int) = settingsManager.clearWriteStatus(address)
+
+    fun resetToDefaults() {
+        if (_resettingDefaults.value) return
+        viewModelScope.launch {
+            _resettingDefaults.value = true
+            val writableRegisters = Sg100Registers.holding.values
+                .filter { it.writable }
+                .sortedBy { it.address }
+
+            // Mark every register as pending so the UI shows progress immediately
+            writableRegisters.forEach { def -> settingsManager.markPending(def.address) }
+
+            pollingManager.pause()
+            packetLogger.message("RESET", "Writing factory defaults to ${writableRegisters.size} registers")
+
+            try {
+                writableRegisters.forEach { def ->
+                    val result = try {
+                        repository.writeSingleRegister(def.address, def.default)
+                    } catch (e: Exception) {
+                        WriteResult.Failure(e.message ?: "Write error")
+                    }
+                    when (result) {
+                        is WriteResult.Success -> {
+                            settingsManager.markClean(def.address, def.default)
+                            packetLogger.message("RESET", "OK ${def.address}=${def.default}")
+                        }
+                        is WriteResult.SuccessWithHolding -> {
+                            val actual = result.block.value(def.address)
+                            settingsManager.loadHoldingRegisters(result.block.registers)
+                            settingsManager.markClean(def.address, actual)
+                            packetLogger.message("RESET", "OK ${def.address}=$actual (readback)")
+                        }
+                        is WriteResult.Failure -> {
+                            settingsManager.markError(def.address, result.reason)
+                            packetLogger.message("RESET", "FAIL ${def.address}: ${result.reason}")
+                        }
+                    }
+                }
+                packetLogger.message("RESET", "Factory defaults write sequence complete")
+            } finally {
+                pollingManager.resume()
+                _resettingDefaults.value = false
+            }
+        }
+    }
 
     fun setGraphZoom(zoom: Float) = graphManager.setZoom(zoom)
 
