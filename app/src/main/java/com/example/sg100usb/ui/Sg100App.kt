@@ -115,17 +115,17 @@ private val TextMuted = Color(0xFF7A9880)   // muted
 private enum class HtTab { MainConfig, Pid, Graph, Records, Monitor }
 
 private val navItems = listOf(
+    HtTab.Monitor    to "Monitor",
     HtTab.MainConfig to "Config",
     HtTab.Pid        to "PID",
     HtTab.Graph      to "Graph",
     HtTab.Records    to "Records",
-    HtTab.Monitor    to "Monitor",
 )
 
 // ── Root composable ───────────────────────────────────────────────────────────
 @Composable
 fun Sg100App(viewModel: DashboardViewModel) {
-    var tab by remember { mutableStateOf(HtTab.MainConfig) }
+    var tab by remember { mutableStateOf(HtTab.Monitor) }
 
     MaterialTheme(
         colorScheme = androidx.compose.material3.lightColorScheme(
@@ -1549,22 +1549,36 @@ private fun MonitorScreen(polling: PollingSnapshot) {
         }
 
         // ── Device info ───────────────────────────────────────────────────────
+        val fwText   = if (fw > 0) String.format(Locale.US, "%.2f", fw / 100.0) else "--"
+        val ctrlText = when (ctrl) {
+            50      -> "SG-50"
+            100     -> "SG-100"
+            110     -> "SG-100"   // device returns 110 for SG-100
+            2008300 -> "SG-2008300"
+            0       -> "--"
+            else    -> "SG-$ctrl"
+        }
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(PanelBg)
-                .border(1.dp, BorderClr, RoundedCornerShape(10.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                .border(1.dp, HtGreen.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            val fwText = if (fw > 0) String.format(Locale.US, "%.2f", fw / 100.0) else "--"
-            val ctrlText = when (ctrl) { 50 -> "SG-50"; 110 -> "SG-110"; 2008300 -> "SG-2008300"; 0 -> "--"; else -> "$ctrl" }
-            ReadonlyInfoPair("Firmware", fwText, HtGreen)
-            Box(Modifier.width(1.dp).fillMaxHeight().background(BorderClr))
-            ReadonlyInfoPair("Controller", ctrlText, HtGreenLt)
-            Box(Modifier.width(1.dp).fillMaxHeight().background(BorderClr))
-            ReadonlyInfoPair("Poll Rate", if (polling.controllerOnline) "${formatOne(polling.pollingRateHz)} Hz" else "offline", if (polling.controllerOnline) AmberA else TextMuted)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("FIRMWARE VERSION", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Text(fwText, color = HtGreen, fontSize = 22.sp, fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace)
+            }
+            Box(Modifier.width(1.dp).height(44.dp).background(BorderClr))
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("CONTROLLER", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                Text(ctrlText, color = HtGreenLt, fontSize = 22.sp, fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace)
+            }
         }
     }
 }
