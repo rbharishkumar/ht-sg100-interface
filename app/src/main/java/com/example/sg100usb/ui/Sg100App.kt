@@ -83,6 +83,8 @@ import com.example.sg100usb.data.WriteStatus
 import com.example.sg100usb.format.EngineeringFormats
 import com.example.sg100usb.protocol.Sg100Registers
 import com.example.sg100usb.protocol.engineSpeedRpm
+import com.example.sg100usb.protocol.requestedSpeedRpm
+import com.example.sg100usb.protocol.syncVoltage
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -90,31 +92,34 @@ import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
-// ── Huegli Tech green colour palette ─────────────────────────────────────────
-private val PageBg      = Color(0xFF060E09)
-private val HeaderBg    = Color(0xFF091410)
-private val PanelBg     = Color(0xFF0E1C12)
-private val PanelBg2    = Color(0xFF122015)
-private val GraphBg     = Color(0xFF081009)
-private val BorderClr   = Color(0xFF1E3C26)
-private val TrackClr    = Color(0xFF1C3020)
-private val HtGreen     = Color(0xFF27A85E)   // Huegli Tech primary green
-private val HtGreenLt   = Color(0xFF40CC7A)   // Light accent
-private val AmberA      = Color(0xFFFFB33D)
-private val RedA        = Color(0xFFFF4E59)
-private val TextMain    = Color(0xFFEDF5F0)
-private val TextLabel   = Color(0xFFA0C0A8)
-private val TextMuted   = Color(0xFF527058)
+// ── Huegli Tech — light / white theme ────────────────────────────────────────
+private val PageBg    = Color(0xFFF4F8F5)   // off-white, barely-green tint
+private val HeaderBg  = Color(0xFFFFFFFF)   // pure white header
+private val PanelBg   = Color(0xFFFFFFFF)   // white cards
+private val PanelBg2  = Color(0xFFEDF4EE)   // light input background
+private val GraphBg   = Color(0xFF091209)   // keep graph dark for line contrast
+private val BorderClr = Color(0xFFCADCCC)   // soft grey-green border
+private val TrackClr  = Color(0xFFD6E8D8)   // light slider track
+private val HtGreen   = Color(0xFF1B7A39)   // HT green (dark enough for white bg)
+private val HtGreenLt = Color(0xFF22A04D)   // lighter accent
+private val AmberA    = Color(0xFFB06000)   // amber, readable on white
+private val RedA      = Color(0xFFBD2020)   // red
+private val TextMain  = Color(0xFF162419)   // near-black
+private val TextLabel = Color(0xFF3A5C40)   // dark green-grey label
+private val TextMuted = Color(0xFF7A9880)   // muted
 
 // ── Navigation ────────────────────────────────────────────────────────────────
-private enum class HtTab { MainConfig, Pid, Graph, Records }
+private enum class HtTab { MainConfig, Pid, Graph, Records, Monitor }
 
 private val navItems = listOf(
-    HtTab.MainConfig to "Main Config",
+    HtTab.MainConfig to "Config",
     HtTab.Pid        to "PID",
     HtTab.Graph      to "Graph",
     HtTab.Records    to "Records",
+    HtTab.Monitor    to "Monitor",
 )
 
 // ── Root composable ───────────────────────────────────────────────────────────
@@ -123,15 +128,16 @@ fun Sg100App(viewModel: DashboardViewModel) {
     var tab by remember { mutableStateOf(HtTab.MainConfig) }
 
     MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = PageBg,
-            surface    = PanelBg,
-            primary    = HtGreen,
-            secondary  = HtGreenLt,
-            tertiary   = AmberA,
-            error      = RedA,
-            onBackground = TextMain,
-            onSurface    = TextMain,
+        colorScheme = androidx.compose.material3.lightColorScheme(
+            background    = PageBg,
+            surface       = PanelBg,
+            primary       = HtGreen,
+            secondary     = HtGreenLt,
+            tertiary      = AmberA,
+            error         = RedA,
+            onBackground  = TextMain,
+            onSurface     = TextMain,
+            onPrimary     = Color.White,
         )
     ) {
         Scaffold(
@@ -192,6 +198,10 @@ fun Sg100App(viewModel: DashboardViewModel) {
                                 onDelete = viewModel::deleteRecording,
                             )
                         }
+                        HtTab.Monitor -> {
+                            val polling by viewModel.polling.collectAsState()
+                            MonitorScreen(polling = polling)
+                        }
                     }
                 }
             }
@@ -230,6 +240,7 @@ private fun HtAppHeader(viewModel: DashboardViewModel) {
     Column(
         Modifier
             .fillMaxWidth()
+            .shadow(3.dp)
             .background(HeaderBg)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
@@ -367,6 +378,13 @@ private fun HtNavIcon(tab: HtTab, color: Color) {
                 drawLine(color.copy(alpha = 0.5f), Offset(0.2f * w, h * 0.62f), Offset(0.8f * w, h * 0.62f), 1.dp.toPx())
                 drawLine(color.copy(alpha = 0.5f), Offset(0.2f * w, h * 0.79f), Offset(0.65f * w, h * 0.79f), 1.dp.toPx())
             }
+            HtTab.Monitor -> {
+                // Eye icon — oval outline + pupil dot
+                val cx = size.width / 2f; val cy = size.height / 2f
+                val rx = size.width * 0.46f; val ry = size.height * 0.30f
+                drawOval(color, topLeft = Offset(cx - rx, cy - ry), size = Size(rx * 2, ry * 2), style = Stroke(s))
+                drawCircle(color, ry * 0.55f, Offset(cx, cy))
+            }
         }
     }
 }
@@ -421,6 +439,7 @@ private fun MainConfigScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -476,9 +495,14 @@ private fun MainConfigScreen(
         )
         ParamGrid(optionParams, settings, onEdit, onWrite, onClearStatus)
 
+        // ── Configuration Flags ───────────────────────────────────────────────
+        CompactSectionLabel("Configuration Flags")
+        ConfigFlagsSection(settings = settings, onWrite = onWrite)
+
         // ── Reset button ───────────────────────────────────────────────────────
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(4.dp))
         CompactResetButton(isResettingDefaults) { showResetDialog = true }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -1287,4 +1311,323 @@ private fun formatOne(value: Float): String = String.format(Locale.US, "%.1f", v
 private fun formatDuration(sec: Long): String {
     val m = sec / 60; val s = sec % 60
     return if (m > 0) "${m}m ${s.toString().padStart(2, '0')}s" else "${s}s"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration Flags — bit-level toggle section for packed registers
+// ─────────────────────────────────────────────────────────────────────────────
+
+private data class BitOption(val label: String, val register: Int, val bit: Int)
+
+private val configFlagOptions = listOf(
+    BitOption("CAN Bus Mode",         40069, 12),
+    BitOption("Synch / Load Share",   40069, 10),
+    BitOption("Binary Spd Up/Dn",     40069,  9),
+    BitOption("Ext Speed Trim",       40069,  8),
+    BitOption("Adj Actuator Output",  40069, 11),
+    BitOption("Enable Droop",         40071, 12),
+)
+
+@Composable
+private fun ConfigFlagsSection(
+    settings: Map<Int, EditableRegister>,
+    onWrite: (Int, Int) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // 2-column grid of bit toggles
+        configFlagOptions.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { opt ->
+                    val regRaw   = settings[opt.register]?.register?.raw ?: 0
+                    val isPending = settings[opt.register]?.writeStatus == WriteStatus.Pending
+                    val isActive = (regRaw ushr opt.bit) and 1 == 1
+                    BitToggleCard(
+                        label     = opt.label,
+                        isActive  = isActive,
+                        isPending = isPending,
+                        modifier  = Modifier.weight(1f),
+                        onToggle  = {
+                            val newVal = if (isActive) regRaw and (1 shl opt.bit).inv()
+                                        else           regRaw or  (1 shl opt.bit)
+                            onWrite(opt.register, newVal)
+                        },
+                    )
+                }
+                if (row.size < 2) Spacer(Modifier.weight(1f))
+            }
+        }
+        // Relay Config — mutually exclusive (bit 14 of 40071)
+        RelaySegmentRow(
+            register   = 40071,
+            bit        = 14,
+            settings   = settings,
+            onWrite    = onWrite,
+        )
+    }
+}
+
+@Composable
+private fun BitToggleCard(
+    label: String,
+    isActive: Boolean,
+    isPending: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bgColor  = if (isActive) HtGreen.copy(alpha = 0.10f) else PanelBg
+    val border   = if (isActive) HtGreen.copy(alpha = 0.45f) else BorderClr
+    val textClr  = if (isActive) HtGreen else TextLabel
+
+    Row(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(bgColor)
+            .border(1.dp, border, RoundedCornerShape(10.dp))
+            .then(if (!isPending) Modifier.clickable(onClick = onToggle) else Modifier)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, color = textClr, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.width(6.dp))
+        // Mini toggle pill
+        Box(
+            Modifier
+                .width(30.dp).height(16.dp)
+                .clip(RoundedCornerShape(50))
+                .background(if (isActive) HtGreen else TrackClr),
+            contentAlignment = if (isActive) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(Modifier.padding(2.dp).size(12.dp).background(Color.White, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun RelaySegmentRow(
+    register: Int,
+    bit: Int,
+    settings: Map<Int, EditableRegister>,
+    onWrite: (Int, Int) -> Unit,
+) {
+    val regRaw    = settings[register]?.register?.raw ?: 0
+    val isPending = settings[register]?.writeStatus == WriteStatus.Pending
+    // bit 14 = 1 → Overspeed relay; bit 14 = 0 → Crank Speed relay
+    val isOverspeed = (regRaw ushr bit) and 1 == 1
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PanelBg)
+            .border(1.dp, BorderClr, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Relay Config", color = TextLabel, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.weight(1f))
+        // Crank Speed option
+        RelayOption(
+            label     = "Crank Speed",
+            selected  = !isOverspeed,
+            isPending = isPending,
+            onClick   = { onWrite(register, regRaw and (1 shl bit).inv()) },
+        )
+        Spacer(Modifier.width(4.dp))
+        // Overspeed option
+        RelayOption(
+            label     = "Overspeed",
+            selected  = isOverspeed,
+            isPending = isPending,
+            onClick   = { onWrite(register, regRaw or (1 shl bit)) },
+        )
+    }
+}
+
+@Composable
+private fun RelayOption(label: String, selected: Boolean, isPending: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) HtGreen.copy(alpha = 0.12f) else TrackClr)
+            .border(1.dp, if (selected) HtGreen.copy(alpha = 0.5f) else BorderClr, RoundedCornerShape(8.dp))
+            .then(if (!isPending) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape)
+            .background(if (selected) HtGreen else BorderClr)
+            .border(1.dp, if (selected) HtGreen else TextMuted, CircleShape))
+        Text(label, color = if (selected) HtGreen else TextMuted,
+            fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCREEN 5 — Monitor (read-only live view)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun MonitorScreen(polling: PollingSnapshot) {
+    val input = polling.input
+    val rpm     = input?.engineSpeedRpm ?: 0
+    val pwmEv   = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
+    val reqSpd  = input?.requestedSpeedRpm ?: 0
+    val syncV   = input?.syncVoltage ?: 0.0
+    val actCurr = EngineeringFormats.register(input, 30057)
+    val actPos  = EngineeringFormats.register(input, 30058)
+    val fw      = input?.value(30062) ?: 0
+    val ctrl    = input?.value(30063) ?: 0
+    val statusBits = input?.statusBits ?: emptyMap()
+    val inputBits  = input?.inputBits  ?: emptyMap()
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ── Big live gauges ───────────────────────────────────────────────────
+        Row(
+            Modifier.fillMaxWidth().height(130.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CompactGaugePanel("ENGINE RPM", rpm.toDouble(), 4000.0, "$rpm", "RPM", HtGreen, Modifier.weight(1f).fillMaxHeight())
+            CompactGaugePanel("PWM OUTPUT", pwmEv.displayValue.coerceAtMost(100.0), 100.0, pwmEv.text, "PWM", AmberA, Modifier.weight(1f).fillMaxHeight())
+        }
+
+        // ── Secondary readings ────────────────────────────────────────────────
+        Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ReadonlyTile("REQ SPEED",  "$reqSpd RPM",                    HtGreen,  Modifier.weight(1f).fillMaxHeight())
+            ReadonlyTile("SYNC V",     String.format(Locale.US, "%.3f V", syncV),  HtGreenLt, Modifier.weight(1f).fillMaxHeight())
+            ReadonlyTile("ACT CURRENT",actCurr.text,                     AmberA,   Modifier.weight(1f).fillMaxHeight())
+            ReadonlyTile("ACT POS",    actPos.text,                      RedA,     Modifier.weight(1f).fillMaxHeight())
+        }
+
+        // ── Governor status bits ──────────────────────────────────────────────
+        MonitorPanel(title = "Governor Status") {
+            val statusOrder = listOf(
+                "Droop input status",
+                "Actuator overcurrent",
+                "Gain2 selection input",
+                "Overspeed occurred",
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                statusOrder.forEach { label ->
+                    val active = statusBits[label] == true
+                    StatusBitChip(label = label.take(14), active = active, tint = if (label.contains("Overspeed")) RedA else HtGreen, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        // ── Digital inputs ────────────────────────────────────────────────────
+        MonitorPanel(title = "Digital Inputs") {
+            val inputOrder = listOf(
+                "Speed2 input",
+                "Speed3 input",
+                "Gain input",
+                "Fn key",
+                "Plus key",
+                "Minus key",
+                "Idle input",
+                "Pickup sensor input",
+            )
+            val shortLabels = listOf("Speed 2", "Speed 3", "Gain", "Fn Key", "Plus", "Minus", "Idle", "Pickup")
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                inputOrder.chunked(4).forEachIndexed { rowIdx, rowKeys ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        rowKeys.forEachIndexed { colIdx, key ->
+                            val active = inputBits[key] == true
+                            val shortLabel = shortLabels.getOrElse(rowIdx * 4 + colIdx) { key.take(7) }
+                            StatusBitChip(label = shortLabel, active = active, tint = HtGreenLt, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Device info ───────────────────────────────────────────────────────
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(PanelBg)
+                .border(1.dp, BorderClr, RoundedCornerShape(10.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val fwText = if (fw > 0) String.format(Locale.US, "%.2f", fw / 100.0) else "--"
+            val ctrlText = when (ctrl) { 50 -> "SG-50"; 110 -> "SG-110"; 2008300 -> "SG-2008300"; 0 -> "--"; else -> "$ctrl" }
+            ReadonlyInfoPair("Firmware", fwText, HtGreen)
+            Box(Modifier.width(1.dp).fillMaxHeight().background(BorderClr))
+            ReadonlyInfoPair("Controller", ctrlText, HtGreenLt)
+            Box(Modifier.width(1.dp).fillMaxHeight().background(BorderClr))
+            ReadonlyInfoPair("Poll Rate", if (polling.controllerOnline) "${formatOne(polling.pollingRateHz)} Hz" else "offline", if (polling.controllerOnline) AmberA else TextMuted)
+        }
+    }
+}
+
+@Composable
+private fun ReadonlyTile(label: String, value: String, tint: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(PanelBg)
+            .border(1.dp, tint.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 6.dp, vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(label, color = TextMuted, fontSize = 7.sp, fontWeight = FontWeight.Black, maxLines = 1)
+        Text(value, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Black,
+            fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun MonitorPanel(title: String, content: @Composable () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PanelBg)
+            .border(1.dp, BorderClr, RoundedCornerShape(12.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.width(3.dp).height(11.dp).clip(RoundedCornerShape(50)).background(HtGreen))
+            Text(title.uppercase(Locale.US), color = TextLabel, fontSize = 9.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 1.sp)
+        }
+        content()
+    }
+}
+
+@Composable
+private fun StatusBitChip(label: String, active: Boolean, tint: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (active) tint.copy(alpha = 0.12f) else TrackClr)
+            .border(1.dp, if (active) tint.copy(alpha = 0.5f) else BorderClr, RoundedCornerShape(8.dp))
+            .padding(horizontal = 5.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Box(Modifier.size(7.dp).background(if (active) tint else BorderClr, CircleShape))
+        Text(label, color = if (active) tint else TextMuted, fontSize = 8.sp,
+            fontWeight = if (active) FontWeight.Black else FontWeight.Normal,
+            textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun ReadonlyInfoPair(label: String, value: String, tint: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+        Text(value, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+    }
 }
