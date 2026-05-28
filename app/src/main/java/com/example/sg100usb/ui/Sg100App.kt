@@ -1323,12 +1323,11 @@ private fun formatDuration(sec: Long): String {
 private data class BitOption(val label: String, val register: Int, val bit: Int)
 
 private val configFlagOptions = listOf(
-    BitOption("CAN Bus Mode",         40069, 12),
-    BitOption("Synch / Load Share",   40069, 10),
-    BitOption("Binary Spd Up/Dn",     40069,  9),
-    BitOption("Ext Speed Trim",       40069,  8),
-    BitOption("Adj Actuator Output",  40069, 11),
-    BitOption("Enable Droop",         40071, 12),
+    BitOption("CAN Bus Mode",        40069, 12),
+    BitOption("Synch / Load Share",  40069, 10),
+    BitOption("Binary Spd Up/Dn",   40069,  9),
+    BitOption("Ext Speed Trim",      40069,  8),
+    BitOption("Adj Actuator Output", 40069, 11),
 )
 
 @Composable
@@ -1359,6 +1358,9 @@ private fun ConfigFlagsSection(
                 if (row.size < 2) Spacer(Modifier.weight(1f))
             }
         }
+        // Droop % — bits 0-7 of register 40071 (raw / 10 = %, range 0.0–10.0)
+        DroopPercentRow(settings = settings, onWrite = onWrite)
+
         // Relay Config — mutually exclusive (bit 14 of 40071)
         RelaySegmentRow(
             register   = 40071,
@@ -1403,6 +1405,72 @@ private fun BitToggleCard(
             contentAlignment = if (isActive) Alignment.CenterEnd else Alignment.CenterStart,
         ) {
             Box(Modifier.padding(2.dp).size(12.dp).background(Color.White, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun DroopPercentRow(
+    settings: Map<Int, EditableRegister>,
+    onWrite: (Int, Int) -> Unit,
+) {
+    val reg       = settings[40071]
+    val regRaw    = reg?.register?.raw ?: 0
+    val droopRaw  = regRaw and 0xFF           // bits 0–7 only
+    val isPending = reg?.writeStatus == WriteStatus.Pending
+
+    var text by remember(droopRaw) { mutableStateOf(String.format(Locale.US, "%.1f", droopRaw / 10.0)) }
+
+    val editedRaw = (text.toFloatOrNull()?.let { (it * 10).toInt() } ?: droopRaw).coerceIn(0, 100)
+    val isDirty   = editedRaw != droopRaw
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(PanelBg)
+            .border(1.dp, if (isDirty) AmberA.copy(alpha = 0.5f) else BorderClr, RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Droop", color = TextLabel, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(60.dp))
+        Spacer(Modifier.weight(1f))
+        BasicTextField(
+            value = text,
+            onValueChange = { new -> text = new.filter { it.isDigit() || it == '.' }.take(4) },
+            singleLine = true,
+            textStyle = TextStyle(
+                color = if (isDirty) AmberA else TextMain,
+                fontSize = 13.sp, fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace, textAlign = TextAlign.End,
+            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.width(52.dp),
+            decorationBox = { inner ->
+                Box(
+                    Modifier.width(52.dp).height(22.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(PanelBg2)
+                        .padding(horizontal = 5.dp, vertical = 3.dp),
+                ) { inner() }
+            },
+        )
+        Text("%", color = TextMuted, fontSize = 10.sp, modifier = Modifier.width(16.dp))
+        when {
+            isPending -> Text("…", color = AmberA, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            isDirty   -> Box(
+                Modifier.size(22.dp).clip(RoundedCornerShape(5.dp))
+                    .background(HtGreen.copy(alpha = 0.2f))
+                    .clickable {
+                        val newDroopRaw = editedRaw
+                        val newRegRaw   = (regRaw and 0xFF00) or (newDroopRaw and 0xFF)
+                        onWrite(40071, newRegRaw)
+                    },
+                contentAlignment = Alignment.Center,
+            ) { Text("W", color = HtGreen, fontSize = 9.sp, fontWeight = FontWeight.Black) }
+            else      -> Text(String.format(Locale.US, "%.1f%%", droopRaw / 10.0), color = TextMuted, fontSize = 9.sp)
         }
     }
 }
