@@ -62,7 +62,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -1472,8 +1475,9 @@ private fun RelayOption(label: String, selected: Boolean, isPending: Boolean, on
 @Composable
 private fun MonitorScreen(polling: PollingSnapshot) {
     val input = polling.input
-    val rpm     = input?.engineSpeedRpm ?: 0
+    val rpm     = (input?.engineSpeedRpm ?: 0).toFloat()
     val pwmEv   = EngineeringFormats.register(input, Sg100Registers.PWM_REGISTER)
+    val pwm     = pwmEv.displayValue.toFloat().coerceIn(0f, 100f)
     val reqSpd  = input?.requestedSpeedRpm ?: 0
     val syncV   = input?.syncVoltage ?: 0.0
     val actCurr = EngineeringFormats.register(input, 30057)
@@ -1490,14 +1494,8 @@ private fun MonitorScreen(polling: PollingSnapshot) {
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // ── Big live gauges ───────────────────────────────────────────────────
-        Row(
-            Modifier.fillMaxWidth().height(110.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CompactGaugePanel("ENGINE RPM", rpm.toDouble(), 4000.0, "$rpm", "RPM", HtGreen, Modifier.weight(1f).fillMaxHeight())
-            CompactGaugePanel("PWM OUTPUT", pwmEv.displayValue.coerceAtMost(100.0), 100.0, pwmEv.text, "PWM", AmberA, Modifier.weight(1f).fillMaxHeight())
-        }
+        // ── Dashboard-style analog gauges ─────────────────────────────────────
+        GovernorGaugeCard(rpm = rpm, pwm = pwm)
 
         // ── Secondary readings ────────────────────────────────────────────────
         Row(Modifier.fillMaxWidth().height(50.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1510,10 +1508,10 @@ private fun MonitorScreen(polling: PollingSnapshot) {
         // ── Governor status bits ──────────────────────────────────────────────
         MonitorPanel(title = "Governor Status") {
             val statusItems = listOf(
-                "Droop input status"   to "Droop\nInput",
-                "Actuator overcurrent" to "Actuator\nOvercurrent",
+                "Droop input status"    to "Droop\nInput",
+                "Actuator overcurrent"  to "Actuator\nOvercurrent",
                 "Gain2 selection input" to "Gain2\nSelect",
-                "Overspeed occurred"   to "Overspeed\nOccurred",
+                "Overspeed occurred"    to "Overspeed\nOccurred",
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 statusItems.forEach { (key, shortLabel) ->
@@ -1525,24 +1523,14 @@ private fun MonitorScreen(polling: PollingSnapshot) {
 
         // ── Digital inputs ────────────────────────────────────────────────────
         MonitorPanel(title = "Digital Inputs") {
-            val inputOrder = listOf(
-                "Speed2 input",
-                "Speed3 input",
-                "Gain input",
-                "Fn key",
-                "Plus key",
-                "Minus key",
-                "Idle input",
-                "Pickup sensor input",
-            )
+            val inputOrder  = listOf("Speed2 input", "Speed3 input", "Gain input", "Fn key", "Plus key", "Minus key", "Idle input", "Pickup sensor input")
             val shortLabels = listOf("Speed 2", "Speed 3", "Gain", "Fn Key", "Plus", "Minus", "Idle", "Pickup")
             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 inputOrder.chunked(4).forEachIndexed { rowIdx, rowKeys ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         rowKeys.forEachIndexed { colIdx, key ->
                             val active = inputBits[key] == true
-                            val shortLabel = shortLabels.getOrElse(rowIdx * 4 + colIdx) { key.take(7) }
-                            StatusBitChip(label = shortLabel, active = active, tint = HtGreenLt, modifier = Modifier.weight(1f))
+                            StatusBitChip(label = shortLabels.getOrElse(rowIdx * 4 + colIdx) { key.take(7) }, active = active, tint = HtGreenLt, modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -1554,7 +1542,7 @@ private fun MonitorScreen(polling: PollingSnapshot) {
         val ctrlText = when (ctrl) {
             50      -> "SG-50"
             100     -> "SG-100"
-            110     -> "SG-100"   // device returns 110 for SG-100
+            110     -> "SG-100"
             2008300 -> "SG-2008300"
             0       -> "--"
             else    -> "SG-$ctrl"
@@ -1571,17 +1559,210 @@ private fun MonitorScreen(polling: PollingSnapshot) {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("FIRMWARE VERSION", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                Text(fwText, color = HtGreen, fontSize = 22.sp, fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace)
+                Text(fwText, color = HtGreen, fontSize = 22.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
             }
             Box(Modifier.width(1.dp).height(44.dp).background(BorderClr))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("CONTROLLER", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                Text(ctrlText, color = HtGreenLt, fontSize = 22.sp, fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace)
+                Text(ctrlText, color = HtGreenLt, fontSize = 22.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
             }
         }
+        Spacer(Modifier.height(4.dp))
     }
+}
+
+// ── Governor gauge card ───────────────────────────────────────────────────────
+@Composable
+private fun GovernorGaugeCard(rpm: Float, pwm: Float) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF0C1610))
+            .border(1.dp, HtGreen.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            "GOVERNOR VALUES",
+            color = Color(0xFF6FA87A),
+            fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp,
+        )
+        DashboardGauge(
+            value = rpm,
+            maxValue = 3000f,
+            label = "RPM",
+            scaleStep = 500f,
+            minorDivisions = 5,
+            arcColors = listOf(Color(0xFFD4A020), Color(0xFFE06010), Color(0xFFCC2020)),
+            modifier = Modifier.fillMaxWidth(0.90f).height(210.dp),
+        )
+        DashboardGauge(
+            value = pwm,
+            maxValue = 100f,
+            label = "PWM",
+            scaleStep = 10f,
+            minorDivisions = 5,
+            arcColors = listOf(Color(0xFF1A4ACC), Color(0xFF2070FF), Color(0xFF60A0FF)),
+            modifier = Modifier.fillMaxWidth(0.73f).height(168.dp),
+        )
+    }
+}
+
+// ── Realistic dashboard analog gauge ─────────────────────────────────────────
+@Composable
+private fun DashboardGauge(
+    value: Float,
+    maxValue: Float,
+    label: String,
+    scaleStep: Float,
+    minorDivisions: Int = 5,
+    arcColors: List<Color>,
+    modifier: Modifier = Modifier,
+) {
+    val animatedValue by animateFloatAsState(
+        targetValue = value.coerceIn(0f, maxValue),
+        animationSpec = tween(500, easing = FastOutSlowInEasing),
+        label = "dashGauge",
+    )
+    val textMeasurer = rememberTextMeasurer()
+
+    Canvas(modifier) {
+        val startAngle = 150f   // 150° in canvas (0°=right, clockwise) ≈ 7:30 clock position
+        val sweepTotal = 240f   // ends at ≈ 4:30 clock position
+        val fraction   = (animatedValue / maxValue).coerceIn(0f, 1f)
+
+        val side = min(size.width, size.height)
+        val cx   = size.width / 2f
+        val cy   = size.height / 2f
+
+        val outerR       = side * 0.495f
+        val rimR         = outerR - side * 0.042f
+        val arcR         = rimR * 0.80f
+        val trackStrokeW = side * 0.052f
+
+        // Sp sizes via Density (DrawScope extends Density, so density/fontScale available)
+        val tickFontSp  = (side * 0.058f / (density * fontScale)).sp
+        val labelFontSp = (side * 0.080f / (density * fontScale)).sp
+        val dispFontSp  = (side * 0.090f / (density * fontScale)).sp
+
+        // 1. Outer metallic rim
+        drawCircle(
+            brush = Brush.radialGradient(
+                listOf(Color(0xFF505050), Color(0xFF242424), Color(0xFF080808)),
+                Offset(cx, cy), outerR,
+            ),
+            radius = outerR, center = Offset(cx, cy),
+        )
+
+        // 2. Dark gauge face
+        drawCircle(
+            brush = Brush.radialGradient(
+                listOf(Color(0xFF303030), Color(0xFF161616), Color(0xFF050505)),
+                Offset(cx - side * 0.07f, cy - side * 0.07f), rimR * 1.4f,
+            ),
+            radius = rimR, center = Offset(cx, cy),
+        )
+
+        // 3. Track arc (dim background)
+        val arcLeft = cx - arcR; val arcTop = cy - arcR
+        val arcSz   = Size(arcR * 2, arcR * 2)
+        drawArc(
+            color = Color(0xFF252525),
+            startAngle = startAngle, sweepAngle = sweepTotal, useCenter = false,
+            topLeft = Offset(arcLeft, arcTop), size = arcSz,
+            style = Stroke(trackStrokeW, cap = StrokeCap.Butt),
+        )
+
+        // 4. Colored value arc — gradient via 60 thin segments
+        if (fraction > 0.005f) {
+            repeat(60) { i ->
+                val t0 = i.toFloat() / 60
+                if (t0 >= fraction) return@repeat
+                drawArc(
+                    color = lerpColors(arcColors, t0),
+                    startAngle = startAngle + sweepTotal * t0,
+                    sweepAngle = sweepTotal / 60 + 0.4f,
+                    useCenter = false,
+                    topLeft = Offset(arcLeft, arcTop), size = arcSz,
+                    style = Stroke(trackStrokeW, cap = StrokeCap.Butt),
+                )
+            }
+        }
+
+        // 5. Tick marks and scale labels (TextMeasurer — Compose-native text drawing)
+        val tickOuterR = arcR - trackStrokeW * 0.55f
+        val majorLen   = side * 0.072f
+        val minorLen   = side * 0.036f
+        val totalSegs  = (maxValue / scaleStep).toInt() * minorDivisions
+        val tickStyle  = TextStyle(color = Color(0xFFBBBBBB), fontSize = tickFontSp, fontWeight = FontWeight.Bold)
+
+        for (i in 0..totalSegs) {
+            val frac     = i.toFloat() / totalSegs
+            val angleDeg = startAngle + sweepTotal * frac
+            val rad      = Math.toRadians(angleDeg.toDouble())
+            val isMajor  = i % minorDivisions == 0
+            val cosA     = cos(rad).toFloat(); val sinA = sin(rad).toFloat()
+            val innerR   = tickOuterR - if (isMajor) majorLen else minorLen
+            drawLine(
+                color       = if (isMajor) Color(0xFFBBBBBB) else Color(0xFF484848),
+                start       = Offset(cx + cosA * innerR, cy + sinA * innerR),
+                end         = Offset(cx + cosA * tickOuterR, cy + sinA * tickOuterR),
+                strokeWidth = if (isMajor) side * 0.012f else side * 0.006f,
+                cap         = StrokeCap.Round,
+            )
+            if (isMajor) {
+                val lr       = innerR - side * 0.045f
+                val lx       = cx + cosA * lr
+                val ly       = cy + sinA * lr
+                val measured = textMeasurer.measure((frac * maxValue).toInt().toString(), tickStyle)
+                drawText(measured, topLeft = Offset(lx - measured.size.width / 2f, ly - measured.size.height / 2f))
+            }
+        }
+
+        // 6. Needle: glow + white shaft + red tip
+        val needleRad = Math.toRadians((startAngle + sweepTotal * fraction).toDouble())
+        val needleR   = arcR * 0.70f
+        val nTipX     = cx + cos(needleRad).toFloat() * needleR
+        val nTipY     = cy + sin(needleRad).toFloat() * needleR
+        drawLine(Color.White.copy(alpha = 0.10f), Offset(cx, cy), Offset(nTipX, nTipY), side * 0.030f, StrokeCap.Round)
+        drawLine(Color(0xFFDDDDDD), Offset(cx, cy), Offset(nTipX, nTipY), side * 0.008f, StrokeCap.Round)
+        val splitX = cx + cos(needleRad).toFloat() * needleR * 0.78f
+        val splitY = cy + sin(needleRad).toFloat() * needleR * 0.78f
+        drawLine(Color(0xFFCC1E1E), Offset(splitX, splitY), Offset(nTipX, nTipY), side * 0.010f, StrokeCap.Round)
+
+        // 7. Center hub
+        drawCircle(Color(0xFF111111), side * 0.068f, Offset(cx, cy))
+        drawCircle(
+            Brush.radialGradient(listOf(Color(0xFF585858), Color(0xFF1E1E1E)), Offset(cx, cy), side * 0.055f),
+            side * 0.048f, Offset(cx, cy),
+        )
+        drawCircle(Color(0xFF0D0D0D), side * 0.020f, Offset(cx, cy))
+
+        // 8. Digital display box + value
+        val boxW  = side * 0.30f; val boxH = side * 0.11f
+        val boxCY = cy + arcR * 0.50f
+        val boxL  = cx - boxW / 2f; val boxT = boxCY - boxH / 2f
+        drawRoundRect(Color(0xFF040404), Offset(boxL, boxT), Size(boxW, boxH), androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()))
+        drawRoundRect(Color(0xFF2A2A2A), Offset(boxL, boxT), Size(boxW, boxH), androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()), style = Stroke(0.7.dp.toPx()))
+        val dispStyle   = TextStyle(color = Color(0xFFDD2323), fontSize = dispFontSp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+        val dispMeasure = textMeasurer.measure(animatedValue.toInt().toString(), dispStyle)
+        drawText(dispMeasure, topLeft = Offset(cx - dispMeasure.size.width / 2f, boxCY - dispMeasure.size.height / 2f))
+
+        // 9. Gauge label (RPM / PWM)
+        val lblStyle   = TextStyle(color = Color(0xFFCCCCCC).copy(alpha = 0.70f), fontSize = labelFontSp, fontWeight = FontWeight.Bold)
+        val lblMeasure = textMeasurer.measure(label, lblStyle)
+        drawText(lblMeasure, topLeft = Offset(cx - lblMeasure.size.width / 2f, cy + arcR * 0.13f - lblMeasure.size.height / 2f))
+    }
+}
+
+private fun lerpColors(colors: List<Color>, t: Float): Color {
+    if (colors.size == 1) return colors[0]
+    val clamped = t.coerceIn(0f, 1f)
+    val scaled  = clamped * (colors.size - 1)
+    val idx     = scaled.toInt().coerceIn(0, colors.size - 2)
+    return lerp(colors[idx], colors[idx + 1], scaled - idx)
 }
 
 @Composable
